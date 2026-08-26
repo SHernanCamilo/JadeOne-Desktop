@@ -1,0 +1,16 @@
+<UserControl x:Class="SaraBI.Controls.ExcelColumnHeader"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <DockPanel LastChildFill="True">
+    <Button x:Name="FilterButton" DockPanel.Dock="Right" Width="18" Height="18"
+            Margin="2,0,1,0" Cursor="Hand" Click="OnFilterClick"
+            ToolTip="Filtro de columna"
+            Background="Transparent" BorderThickness="0" Padding="0">
+      <Path x:Name="FilterIcon" Data="M2,2 L16,2 L10,10 L10,16 L8,16 L8,10 Z"
+            Fill="#6B7280" Stretch="Uniform" Width="10" Height="10"/>
+    </Button>
+    <TextBlock x:Name="TitleBlock" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+               Margin="2,0,0,0" FontWeight="SemiBold" FontFamily="Calibri" FontSize="12"
+               Foreground="#1A5C38"/>
+  </DockPanel>
+</UserControl>

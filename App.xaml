@@ -1,0 +1,139 @@
+<Application x:Class="SaraBI.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ShutdownMode="OnMainWindowClose">
+  <Application.Resources>
+    <SolidColorBrush x:Key="Xl.Green" Color="#217346"/>
+    <SolidColorBrush x:Key="Xl.GreenDark" Color="#1A5C38"/>
+    <SolidColorBrush x:Key="Xl.Chrome" Color="#F5F5F5"/>
+    <SolidColorBrush x:Key="Xl.Line" Color="#D4D4D4"/>
+    <SolidColorBrush x:Key="Xl.Text" Color="#212121"/>
+    <SolidColorBrush x:Key="Xl.TextSoft" Color="#616161"/>
+    <FontFamily x:Key="AppFont">Segoe UI</FontFamily>
+
+    <Style x:Key="XlTab" TargetType="RadioButton">
+      <Setter Property="Foreground" Value="#EBFFFFFF"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Padding" Value="13,0"/>
+      <Setter Property="Height" Value="26"/>
+      <Setter Property="FontSize" Value="12.5"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="RadioButton">
+            <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                    CornerRadius="4,4,0,0" Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#24FFFFFF"/>
+              </Trigger>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#F5F5F5"/>
+                <Setter Property="Foreground" Value="#1A5C38"/>
+                <Setter Property="FontWeight" Value="SemiBold"/>
+                <Setter Property="Height" Value="30"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="XlRibbonBtn" TargetType="Button">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderBrush" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Foreground" Value="#212121"/>
+      <Setter Property="Padding" Value="6,4"/>
+      <Setter Property="MinWidth" Value="52"/>
+      <Setter Property="MinHeight" Value="52"/>
+      <Setter Property="FontSize" Value="10.5"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="3" Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#E8E8E8"/>
+                <Setter TargetName="Bd" Property="BorderBrush" Value="#CFCFCF"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#DEDEDE"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.4"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="XlTitleBtn" TargetType="Button">
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderBrush" Value="#66FFFFFF"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Padding" Value="12,0"/>
+      <Setter Property="Height" Value="30"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="3" Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#28FFFFFF"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.45"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="XlCtaBtn" TargetType="Button" BasedOn="{StaticResource XlTitleBtn}">
+      <Setter Property="Background" Value="White"/>
+      <Setter Property="BorderBrush" Value="White"/>
+      <Setter Property="Foreground" Value="#1A5C38"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+
+    <Style x:Key="XlGreenBtn" TargetType="Button">
+      <Setter Property="Background" Value="#217346"/>
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Padding" Value="16,8"/>
+      <Setter Property="FontSize" Value="13"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border Background="{TemplateBinding Background}" CornerRadius="4"
+                    Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </Application.Resources>
+</Application>

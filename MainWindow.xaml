@@ -1,0 +1,340 @@
+<Window x:Class="SaraBI.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:primitives="clr-namespace:System.Windows.Controls.Primitives;assembly=PresentationFramework"
+        Title="JadeOne Desktop"
+        Height="760" Width="1360"
+        MinHeight="520" MinWidth="980"
+        WindowStartupLocation="CenterScreen"
+        FontFamily="Segoe UI"
+        Background="#F5F5F5">
+  <DockPanel>
+    <!-- Title bar -->
+    <Border DockPanel.Dock="Top" Background="#217346" Height="44" Padding="10,0,8,0">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+          <Border Width="24" Height="24" Background="#1A5C38" CornerRadius="3" Margin="0,0,9,0">
+            <TextBlock Text="X" Foreground="White" FontWeight="Bold" FontSize="13"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Border>
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock x:Name="TitleText" Text="JadeOne Desktop" Foreground="White"
+                       FontSize="13" FontWeight="SemiBold"/>
+            <TextBlock x:Name="SubtitleText" Text="Abra una vista desde la plataforma web"
+                       Foreground="#BFFFFFFF" FontSize="11"/>
+          </StackPanel>
+          <Border Margin="10,0,0,0" Padding="9,3" CornerRadius="12" Background="#24FFFFFF"
+                  VerticalAlignment="Center">
+            <TextBlock x:Name="SavedBadge" Text="Escritorio" Foreground="#E6FFFFFF" FontSize="11"/>
+          </Border>
+        </StackPanel>
+        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+          <Button x:Name="RefreshButton" Content="Actualizar todo" Style="{StaticResource XlTitleBtn}"
+                  Margin="0,0,6,0" Click="OnRefresh" IsEnabled="False"/>
+          <Button x:Name="ExportButton" Content="Excel" Style="{StaticResource XlCtaBtn}"
+                  Click="OnExportExcel" IsEnabled="False"/>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- Ribbon tabs -->
+    <Border DockPanel.Dock="Top" Background="#217346" Height="30" Padding="6,0,6,0">
+      <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom">
+        <RadioButton x:Name="TabDatos" Style="{StaticResource XlTab}" Content="Datos"
+                     GroupName="Ribbon" IsChecked="True" Checked="OnRibbonTab"/>
+        <RadioButton x:Name="TabFiltros" Style="{StaticResource XlTab}" Content="Filtros"
+                     GroupName="Ribbon" Checked="OnRibbonTab"/>
+        <RadioButton x:Name="TabVista" Style="{StaticResource XlTab}" Content="Vista"
+                     GroupName="Ribbon" Checked="OnRibbonTab"/>
+        <RadioButton x:Name="TabFormato" Style="{StaticResource XlTab}" Content="Formato"
+                     GroupName="Ribbon" Checked="OnRibbonTab"/>
+        <RadioButton x:Name="TabFormulas" Style="{StaticResource XlTab}" Content="Fórmulas"
+                     GroupName="Ribbon" Checked="OnRibbonTab"/>
+        <RadioButton x:Name="TabAnalisis" Style="{StaticResource XlTab}" Content="Análisis"
+                     GroupName="Ribbon" Checked="OnRibbonTab"/>
+      </StackPanel>
+    </Border>
+
+    <!-- Ribbon body -->
+    <Border DockPanel.Dock="Top" Background="#F5F5F5" Height="78" BorderBrush="#D4D4D4" BorderThickness="0,0,0,1">
+      <Grid>
+        <StackPanel x:Name="RibbonDatos" Orientation="Horizontal">
+          <StackPanel Style="{x:Null}" Margin="8,4,8,2">
+            <StackPanel Orientation="Horizontal">
+              <Button Style="{StaticResource XlRibbonBtn}" Click="OnRefresh">
+                <StackPanel>
+                  <TextBlock Text="↻" FontSize="16" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Actualizar&#x0a;todo" TextAlignment="Center"/>
+                </StackPanel>
+              </Button>
+              <Button x:Name="CancelButton" Style="{StaticResource XlRibbonBtn}" Click="OnCancel" IsEnabled="False">
+                <StackPanel>
+                  <TextBlock Text="■" FontSize="12" Foreground="#C0392B" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Cancelar" TextAlignment="Center"/>
+                </StackPanel>
+              </Button>
+            </StackPanel>
+            <TextBlock Text="Conexión" FontSize="10.5" Foreground="#757575" HorizontalAlignment="Center"/>
+          </StackPanel>
+          <Border Width="1" Background="#E0E0E0" Margin="0,8"/>
+          <StackPanel Margin="8,4,8,2">
+            <Button Style="{StaticResource XlRibbonBtn}" Click="OnAddViewHint">
+              <StackPanel>
+                <TextBlock Text="＋" FontSize="16" Foreground="#217346" HorizontalAlignment="Center"/>
+                <TextBlock Text="Agregar&#x0a;vista" TextAlignment="Center"/>
+              </StackPanel>
+            </Button>
+            <TextBlock Text="Vistas" FontSize="10.5" Foreground="#757575" HorizontalAlignment="Center"/>
+          </StackPanel>
+          <Border Width="1" Background="#E0E0E0" Margin="0,8"/>
+          <StackPanel Margin="8,4,8,2">
+            <StackPanel Orientation="Horizontal">
+              <Button Style="{StaticResource XlRibbonBtn}" Click="OnShowFiltersTab">
+                <StackPanel>
+                  <TextBlock Text="☰" FontSize="14" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Filtros&#x0a;dinámicos" TextAlignment="Center"/>
+                </StackPanel>
+              </Button>
+              <Button Style="{StaticResource XlRibbonBtn}" Click="OnClearFilters">
+                <StackPanel>
+                  <TextBlock Text="✕" FontSize="14" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Limpiar&#x0a;filtros" TextAlignment="Center"/>
+                </StackPanel>
+              </Button>
+            </StackPanel>
+            <TextBlock Text="Filtrar" FontSize="10.5" Foreground="#757575" HorizontalAlignment="Center"/>
+          </StackPanel>
+          <Border Width="1" Background="#E0E0E0" Margin="0,8"/>
+          <StackPanel Margin="8,4,8,2">
+            <StackPanel Orientation="Horizontal">
+              <Button x:Name="TotalsButton" Style="{StaticResource XlRibbonBtn}" Click="OnToggleTotals">
+                <StackPanel>
+                  <TextBlock Text="Σ" FontSize="16" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Fila de&#x0a;totales" TextAlignment="Center"/>
+                </StackPanel>
+              </Button>
+              <Button Style="{StaticResource XlRibbonBtn}" Click="OnFreeze">
+                <StackPanel>
+                  <TextBlock Text="⊞" FontSize="14" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Congelar&#x0a;columnas" TextAlignment="Center"/>
+                </StackPanel>
+              </Button>
+              <Button Style="{StaticResource XlRibbonBtn}" Click="OnUnfreeze">
+                <StackPanel>
+                  <TextBlock Text="⊟" FontSize="14" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Descongelar" TextAlignment="Center"/>
+                </StackPanel>
+              </Button>
+            </StackPanel>
+            <TextBlock Text="Herramientas" FontSize="10.5" Foreground="#757575" HorizontalAlignment="Center"/>
+          </StackPanel>
+          <Border Width="1" Background="#E0E0E0" Margin="0,8"/>
+          <StackPanel Margin="8,4,8,2">
+            <StackPanel Orientation="Horizontal">
+              <Button x:Name="CsvButton" Style="{StaticResource XlRibbonBtn}" Click="OnExportCsv" IsEnabled="False">
+                <StackPanel>
+                  <TextBlock Text="CSV" FontSize="12" FontWeight="SemiBold" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="CSV" TextAlignment="Center"/>
+                </StackPanel>
+              </Button>
+              <Button Style="{StaticResource XlRibbonBtn}" Click="OnExportExcel">
+                <StackPanel>
+                  <TextBlock Text="XLS" FontSize="12" FontWeight="SemiBold" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Excel" TextAlignment="Center"/>
+                </StackPanel>
+              </Button>
+            </StackPanel>
+            <TextBlock Text="Exportar" FontSize="10.5" Foreground="#757575" HorizontalAlignment="Center"/>
+          </StackPanel>
+        </StackPanel>
+
+        <StackPanel x:Name="RibbonFiltros" Orientation="Horizontal" Visibility="Collapsed" Margin="10,10,10,6">
+          <Grid Width="280" VerticalAlignment="Top" Margin="0,0,12,0">
+            <TextBox x:Name="SearchBox" Height="28" Padding="8,4" VerticalContentAlignment="Center"
+                     TextChanged="OnSearchChanged"/>
+            <TextBlock x:Name="SearchHint" Text="Buscar en todas las columnas..."
+                       Foreground="#9CA3AF" Margin="10,6,0,0" IsHitTestVisible="False"/>
+          </Grid>
+          <ComboBox x:Name="FilterColumnCombo" Width="200" Height="28" DisplayMemberPath="Name"
+                    VerticalContentAlignment="Center" Margin="0,0,8,0"/>
+          <TextBox x:Name="ColumnFilterBox" Width="200" Height="28" Padding="8,4"
+                   VerticalContentAlignment="Center" Margin="0,0,8,0"/>
+          <Button Content="Filtrar columna" Height="28" Padding="12,0" Click="OnColumnFilter"/>
+        </StackPanel>
+
+        <StackPanel x:Name="RibbonVista" Orientation="Horizontal" Visibility="Collapsed" Margin="12,16">
+          <TextBlock VerticalAlignment="Center" Foreground="#616161" FontSize="12"
+                     Text="Use Congelar / Descongelar en Datos. El zoom está en la barra inferior."/>
+        </StackPanel>
+
+        <StackPanel x:Name="RibbonFormato" Orientation="Horizontal" Visibility="Collapsed" Margin="12,12">
+          <TextBlock VerticalAlignment="Center" Margin="0,0,12,0" Text="Zoom" Foreground="#616161"/>
+          <Slider x:Name="ZoomSlider" Width="180" Minimum="70" Maximum="160" Value="100"
+                  TickFrequency="10" IsSnapToTickEnabled="True" VerticalAlignment="Center"
+                  ValueChanged="OnZoomChanged"/>
+          <TextBlock x:Name="ZoomLabel" Text="100%" VerticalAlignment="Center" Margin="8,0,0,0"/>
+        </StackPanel>
+
+        <StackPanel x:Name="RibbonFormulas" Orientation="Horizontal" Visibility="Collapsed" Margin="12,16">
+          <TextBlock VerticalAlignment="Center" Foreground="#616161" FontSize="12" TextWrapping="Wrap"
+                     Text="La barra fx muestra el valor de la celda seleccionada. Las fórmulas de Excel se evalúan en la vista web."/>
+        </StackPanel>
+
+        <StackPanel x:Name="RibbonAnalisis" Orientation="Horizontal" Visibility="Collapsed" Margin="12,16">
+          <TextBlock VerticalAlignment="Center" Foreground="#616161" FontSize="12" TextWrapping="Wrap"
+                     Text="Tablas dinámicas y análisis avanzado siguen en la vista web. Aquí puede filtrar, ordenar y exportar el dataset completo."/>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- Formula bar -->
+    <Border DockPanel.Dock="Top" Background="White" Height="24" BorderBrush="#D4D4D4" BorderThickness="0,0,0,1">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="110"/>
+          <ColumnDefinition Width="30"/>
+          <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+        <Border BorderBrush="#D4D4D4" BorderThickness="0,0,1,0">
+          <TextBlock x:Name="CellRefText" Text="A1" VerticalAlignment="Center" Margin="8,0"
+                     FontFamily="Calibri" FontSize="12"/>
+        </Border>
+        <Border Grid.Column="1" BorderBrush="#D4D4D4" BorderThickness="0,0,1,0">
+          <TextBlock Text="fx" FontStyle="Italic" FontFamily="Times New Roman" FontSize="13"
+                     Foreground="#616161" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Border>
+        <TextBox x:Name="FormulaBox" Grid.Column="2" BorderThickness="0" Padding="8,2"
+                 FontFamily="Calibri" FontSize="12.5" IsReadOnly="True"
+                 Background="#FAFAFA" Foreground="#9E9E9E"/>
+      </Grid>
+    </Border>
+
+    <!-- Status bar -->
+    <Border DockPanel.Dock="Bottom" Background="#217346" Height="24" Padding="8,0">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+          <TextBlock x:Name="StatusText" Text="Sin datos" Foreground="White" FontSize="11.5" FontWeight="SemiBold"/>
+          <TextBlock Text="  ·  " Foreground="#80FFFFFF" FontSize="11.5"/>
+          <TextBlock x:Name="MetricsText" Text="— total   — mostrados   0 filtro(s)" Foreground="#EBFFFFFF" FontSize="11.5"/>
+        </StackPanel>
+        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+          <TextBlock x:Name="HintText" Text="1/1 vistas cargadas" Foreground="#CCFFFFFF" FontSize="11.5" Margin="0,0,10,0"/>
+          <TextBlock x:Name="ZoomStatus" Text="100%" Foreground="White" FontSize="11.5"/>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- Sheet tabs -->
+    <Border DockPanel.Dock="Bottom" Background="#F5F5F5" Height="26" BorderBrush="#D4D4D4" BorderThickness="0,1,0,0">
+      <StackPanel Orientation="Horizontal">
+        <Border Background="White" BorderBrush="#217346" BorderThickness="0,3,1,0" Padding="14,0">
+          <TextBlock x:Name="SheetTabText" Text="Hoja1" FontSize="11.5" FontWeight="SemiBold"
+                     Foreground="#1A5C38" VerticalAlignment="Center"/>
+        </Border>
+      </StackPanel>
+    </Border>
+
+    <Grid Background="White">
+      <Grid.LayoutTransform>
+        <ScaleTransform x:Name="GridZoom" ScaleX="1" ScaleY="1"/>
+      </Grid.LayoutTransform>
+
+      <DataGrid x:Name="Grid"
+                AutoGenerateColumns="True"
+                IsReadOnly="True"
+                CanUserAddRows="False"
+                CanUserDeleteRows="False"
+                CanUserSortColumns="True"
+                CanUserReorderColumns="True"
+                EnableRowVirtualization="True"
+                EnableColumnVirtualization="True"
+                VirtualizingPanel.IsVirtualizing="True"
+                VirtualizingPanel.VirtualizationMode="Recycling"
+                VirtualizingPanel.ScrollUnit="Pixel"
+                HeadersVisibility="All"
+                GridLinesVisibility="All"
+                HorizontalGridLinesBrush="#D4D4D4"
+                VerticalGridLinesBrush="#D4D4D4"
+                AlternatingRowBackground="#F7FBF8"
+                RowBackground="White"
+                FontFamily="Calibri"
+                FontSize="12.5"
+                FrozenColumnCount="0"
+                ClipboardCopyMode="IncludeHeader"
+                SelectionUnit="Cell"
+                SelectionMode="Extended"
+                BorderThickness="0"
+                RowHeaderWidth="42"
+                ColumnHeaderHeight="28"
+                RowHeight="22"
+                LoadingRow="OnLoadingRow"
+                CurrentCellChanged="OnCurrentCellChanged"
+                AutoGeneratingColumn="OnAutoGeneratingColumn">
+        <DataGrid.ColumnHeaderStyle>
+          <Style TargetType="primitives:DataGridColumnHeader">
+            <Setter Property="Background" Value="#E2EFDA"/>
+            <Setter Property="Foreground" Value="#1A5C38"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontFamily" Value="Calibri"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="BorderBrush" Value="#A9D08E"/>
+            <Setter Property="BorderThickness" Value="0,0,1,1"/>
+            <Setter Property="Padding" Value="6,0"/>
+            <Setter Property="Height" Value="28"/>
+          </Style>
+        </DataGrid.ColumnHeaderStyle>
+        <DataGrid.RowHeaderStyle>
+          <Style TargetType="primitives:DataGridRowHeader">
+            <Setter Property="Background" Value="#F5F5F5"/>
+            <Setter Property="Foreground" Value="#616161"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="BorderBrush" Value="#D4D4D4"/>
+            <Setter Property="BorderThickness" Value="0,0,1,1"/>
+          </Style>
+        </DataGrid.RowHeaderStyle>
+      </DataGrid>
+
+      <Border x:Name="TotalsBar" DockPanel.Dock="Bottom" Height="24" Background="#E2EFDA"
+              BorderBrush="#A9D08E" BorderThickness="0,1,0,0" Visibility="Collapsed"
+              VerticalAlignment="Bottom">
+        <TextBlock x:Name="TotalsText" VerticalAlignment="Center" Margin="48,0,8,0"
+                   FontSize="11.5" Foreground="#1A5C38"/>
+      </Border>
+
+      <Border x:Name="Overlay" Background="#D9FFFFFF" Visibility="Collapsed">
+        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="420">
+          <TextBlock x:Name="OverlayTitle" Text="Cargando vista..." FontSize="16"
+                     FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,0,0,8" Foreground="#1A5C38"/>
+          <TextBlock x:Name="OverlayMessage" Text="" Foreground="#4B5563"
+                     HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center" Margin="0,0,0,12"/>
+          <ProgressBar x:Name="OverlayProgress" Height="8" IsIndeterminate="True"
+                       Foreground="#217346"/>
+        </StackPanel>
+      </Border>
+
+      <Border x:Name="EmptyState" Background="White">
+        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="480">
+          <Border Width="64" Height="64" CornerRadius="8" BorderBrush="#217346" BorderThickness="2.5"
+                  Background="#F0FDF4" HorizontalAlignment="Center" Margin="0,0,0,12">
+            <TextBlock Text="X" FontSize="28" FontWeight="Bold" Foreground="#217346"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Border>
+          <TextBlock x:Name="EmptyTitle" Text="JadeOne Desktop" FontSize="18" FontWeight="SemiBold"
+                     HorizontalAlignment="Center" Foreground="#1A5C38"/>
+          <TextBlock Margin="0,8,0,16" TextWrapping="Wrap" TextAlignment="Center" Foreground="#4B5563"
+                     Text="Haga clic en Datos - Actualizar todo para cargar los datos desde Fabric."/>
+          <Button Content="Actualizar todo" Style="{StaticResource XlGreenBtn}"
+                  HorizontalAlignment="Center" Click="OnRefresh"/>
+        </StackPanel>
+      </Border>
+    </Grid>
+  </DockPanel>
+</Window>

@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>JadeOneDesktop</AssemblyName>
+    <RootNamespace>SaraBI</RootNamespace>
+    <Product>JadeOne Desktop</Product>
+    <AssemblyTitle>JadeOne Desktop</AssemblyTitle>
+    <Company>APPMT</Company>
+    <Version>1.0.0</Version>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <SatelliteResourceLanguages>es</SatelliteResourceLanguages>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="MiniExcel" Version="1.41.3" />
+  </ItemGroup>
+</Project>
