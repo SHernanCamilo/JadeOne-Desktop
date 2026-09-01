@@ -37,7 +37,13 @@ public sealed class ApiClient : IDisposable
 
     public async Task<LaunchSession> ClaimAsync(string apiUrl, string ticket, CancellationToken ct)
     {
-        var url = apiUrl.TrimEnd('/') + "/fabric/viewer/desktop/claim";
+        if (!OfficialApi.IsTrustedBase(apiUrl))
+        {
+            throw new InvalidOperationException("La API de destino no está en la lista permitida.");
+        }
+
+        var baseUrl = OfficialApi.Normalize(apiUrl);
+        var url = baseUrl + "/fabric/viewer/desktop/claim";
         var body = JsonSerializer.Serialize(new { ticket });
         using var content = new StringContent(body, Encoding.UTF8, "application/json");
         using var response = await _http.PostAsync(url, content, ct).ConfigureAwait(false);
@@ -56,7 +62,7 @@ public sealed class ApiClient : IDisposable
             Schema = parsed.Schema ?? "",
             View = parsed.View ?? "",
             ViewLabel = parsed.ViewLabel ?? parsed.View ?? "",
-            ApiUrl = parsed.ApiUrl?.TrimEnd('/') ?? apiUrl.TrimEnd('/'),
+            ApiUrl = OfficialApi.BindSessionUrl(baseUrl, parsed.ApiUrl),
             User = parsed.User,
         };
         ApplySession(session);

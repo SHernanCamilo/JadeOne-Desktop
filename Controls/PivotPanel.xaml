@@ -1,0 +1,193 @@
+<UserControl x:Class="SaraBI.Controls.PivotPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             FontFamily="Segoe UI" FontSize="12">
+  <UserControl.Resources>
+    <Style x:Key="ZoneBox" TargetType="Border">
+      <Setter Property="Background" Value="White"/>
+      <Setter Property="BorderBrush" Value="#C8C8C8"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Padding" Value="6,4"/>
+      <Setter Property="Margin" Value="3"/>
+      <Setter Property="AllowDrop" Value="True"/>
+      <Setter Property="MinHeight" Value="78"/>
+      <Setter Property="SnapsToDevicePixels" Value="True"/>
+    </Style>
+    <Style x:Key="ZoneTitle" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="11"/>
+      <Setter Property="Foreground" Value="#616161"/>
+      <Setter Property="Margin" Value="0,0,0,4"/>
+    </Style>
+    <Style x:Key="ChipBox" TargetType="Border">
+      <Setter Property="Background" Value="#E2EFDA"/>
+      <Setter Property="BorderBrush" Value="#A9D08E"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="2"/>
+      <Setter Property="Padding" Value="4,2"/>
+      <Setter Property="Margin" Value="0,0,0,3"/>
+      <Setter Property="Cursor" Value="SizeAll"/>
+    </Style>
+    <DataTemplate x:Key="ChipSimple">
+      <Border Style="{StaticResource ChipBox}" Tag="{Binding}"
+              PreviewMouseLeftButtonDown="OnChipMouseDown"
+              PreviewMouseMove="OnChipMouseMove">
+        <DockPanel>
+          <Button DockPanel.Dock="Right" Content="✕" Width="16" Height="16" FontSize="9"
+                  Background="Transparent" BorderThickness="0" Cursor="Hand"
+                  Tag="{Binding}" Click="OnRemoveChip"/>
+          <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+        </DockPanel>
+      </Border>
+    </DataTemplate>
+  </UserControl.Resources>
+  <Border Background="#F7F7F7" BorderBrush="#D4D4D4" BorderThickness="1,0,0,0">
+    <DockPanel>
+      <Border DockPanel.Dock="Top" Background="#F3F3F3" BorderBrush="#E0E0E0" BorderThickness="0,0,0,1" Padding="10,8">
+        <DockPanel>
+          <Button DockPanel.Dock="Right" Content="✕" Width="22" Height="22"
+                  Background="Transparent" Foreground="#616161" BorderThickness="0"
+                  Cursor="Hand" Click="OnClose" ToolTip="Cerrar"/>
+          <TextBlock Text="Campos de tabla dinámica" Foreground="#212121" FontWeight="SemiBold"
+                     VerticalAlignment="Center"/>
+        </DockPanel>
+      </Border>
+
+      <Border DockPanel.Dock="Bottom" Padding="8,6" BorderBrush="#E0E0E0" BorderThickness="0,1,0,0" Background="#F3F3F3">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+          </Grid.RowDefinitions>
+          <DockPanel>
+            <Button x:Name="ApplyButton" DockPanel.Dock="Right" Content="Actualizar" Width="88" Height="24"
+                    IsEnabled="False" Click="OnApply" Margin="8,0,0,0"/>
+            <CheckBox x:Name="DeferCheck" Content="Aplazar actualización del diseño"
+                      VerticalAlignment="Center" FontSize="11" Checked="OnDeferChanged" Unchecked="OnDeferChanged"/>
+          </DockPanel>
+          <Button Grid.Row="1" Content="Limpiar todo" HorizontalAlignment="Left" Margin="0,6,0,0"
+                  Padding="8,2" Click="OnClearAll"/>
+        </Grid>
+      </Border>
+
+      <DockPanel Margin="8">
+        <Grid DockPanel.Dock="Top" Height="26" Margin="0,0,0,8">
+          <TextBox x:Name="SearchBox" Height="26" Padding="22,3,6,3" TextChanged="OnSearch"/>
+          <TextBlock Text="🔍" Margin="6,4,0,0" Foreground="#9CA3AF" IsHitTestVisible="False"/>
+          <TextBlock x:Name="FieldSearchHint" Text="Buscar" Foreground="#9CA3AF"
+                     Margin="24,5,0,0" IsHitTestVisible="False"/>
+        </Grid>
+        <Grid DockPanel.Dock="Bottom" MinHeight="176">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="*"/>
+          </Grid.RowDefinitions>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="*"/>
+          </Grid.ColumnDefinitions>
+          <Border Style="{StaticResource ZoneBox}" Tag="filters" AllowDrop="True"
+                  Drop="OnZoneDrop" DragOver="OnZoneDragOver" DragEnter="OnZoneDragEnter" DragLeave="OnZoneDragLeave">
+            <DockPanel>
+              <TextBlock DockPanel.Dock="Top" Style="{StaticResource ZoneTitle}" Text="Filtros"/>
+              <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <ItemsControl x:Name="FilterChips">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Border Style="{StaticResource ChipBox}" Tag="{Binding}"
+                              PreviewMouseLeftButtonDown="OnChipMouseDown"
+                              PreviewMouseMove="OnChipMouseMove">
+                        <DockPanel>
+                          <Button DockPanel.Dock="Right" Content="✕" Width="16" Height="16" FontSize="9"
+                                  Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                  Tag="{Binding}" Click="OnRemoveChip"/>
+                          <ComboBox MinWidth="70" FontSize="10" Margin="0,0,4,0"
+                                    ItemsSource="{Binding Choices}" SelectedItem="{Binding SelectedFilter, Mode=TwoWay}"
+                                    Tag="{Binding}" SelectionChanged="OnFilterValueChanged"/>
+                        </DockPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </ScrollViewer>
+            </DockPanel>
+          </Border>
+          <Border Grid.Column="1" Style="{StaticResource ZoneBox}" Tag="columns" AllowDrop="True"
+                  Drop="OnZoneDrop" DragOver="OnZoneDragOver" DragEnter="OnZoneDragEnter" DragLeave="OnZoneDragLeave">
+            <DockPanel>
+              <TextBlock DockPanel.Dock="Top" Style="{StaticResource ZoneTitle}" Text="Columnas"/>
+              <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <ItemsControl x:Name="ColumnChips" ItemTemplate="{StaticResource ChipSimple}"/>
+              </ScrollViewer>
+            </DockPanel>
+          </Border>
+          <Border Grid.Row="1" Style="{StaticResource ZoneBox}" Tag="rows" AllowDrop="True"
+                  Drop="OnZoneDrop" DragOver="OnZoneDragOver" DragEnter="OnZoneDragEnter" DragLeave="OnZoneDragLeave">
+            <DockPanel>
+              <TextBlock DockPanel.Dock="Top" Style="{StaticResource ZoneTitle}" Text="Filas"/>
+              <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <ItemsControl x:Name="RowChips" ItemTemplate="{StaticResource ChipSimple}"/>
+              </ScrollViewer>
+            </DockPanel>
+          </Border>
+          <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource ZoneBox}" Tag="values" AllowDrop="True"
+                  Drop="OnZoneDrop" DragOver="OnZoneDragOver" DragEnter="OnZoneDragEnter" DragLeave="OnZoneDragLeave">
+            <DockPanel>
+              <TextBlock DockPanel.Dock="Top" Style="{StaticResource ZoneTitle}" Text="Valores"/>
+              <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <ItemsControl x:Name="ValueChips">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Border Style="{StaticResource ChipBox}" Tag="{Binding}"
+                              PreviewMouseLeftButtonDown="OnChipMouseDown"
+                              PreviewMouseMove="OnChipMouseMove">
+                        <DockPanel>
+                          <Button DockPanel.Dock="Right" Content="✕" Width="16" Height="16" FontSize="9"
+                                  Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                  Tag="{Binding}" Click="OnRemoveChip"/>
+                          <ComboBox Width="78" FontSize="10" Margin="0,0,4,0" Tag="{Binding}"
+                                    SelectionChanged="OnOpChanged"
+                                    SelectedIndex="{Binding OpIndex, Mode=OneWay}">
+                            <ComboBoxItem Content="Suma" Tag="Sum"/>
+                            <ComboBoxItem Content="Promedio" Tag="Avg"/>
+                            <ComboBoxItem Content="Cuenta" Tag="Count"/>
+                            <ComboBoxItem Content="Mín" Tag="Min"/>
+                            <ComboBoxItem Content="Máx" Tag="Max"/>
+                            <ComboBoxItem Content="Distintos" Tag="Distinct"/>
+                          </ComboBox>
+                          <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"
+                                     VerticalAlignment="Center"/>
+                        </DockPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </ScrollViewer>
+            </DockPanel>
+          </Border>
+        </Grid>
+        <TextBlock DockPanel.Dock="Bottom" Margin="0,8,0,2" FontSize="11" Foreground="#616161"
+                   Text="Arrastrar campos entre las áreas siguientes:" TextWrapping="Wrap"/>
+
+        <Border BorderBrush="#D4D4D4" BorderThickness="1" Background="White" AllowDrop="True"
+                Drop="OnListDrop" DragOver="OnZoneDragOver">
+          <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <ItemsControl x:Name="FieldsList" Margin="4,2">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <DockPanel Margin="0,1" LastChildFill="True">
+                    <CheckBox DockPanel.Dock="Left" IsChecked="{Binding IsChecked, Mode=TwoWay}"
+                              VerticalAlignment="Center" Click="OnFieldCheck"/>
+                    <TextBlock Text="{Binding Name}" Margin="6,2,4,2" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" Cursor="SizeAll"
+                               PreviewMouseLeftButtonDown="OnFieldMouseDown"
+                               PreviewMouseMove="OnFieldMouseMove"/>
+                  </DockPanel>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+        </Border>
+      </DockPanel>
+    </DockPanel>
+  </Border>
+</UserControl>

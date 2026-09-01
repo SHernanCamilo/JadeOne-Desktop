@@ -55,10 +55,10 @@ public static class ProtocolHandler
         }
     }
 
-    public static bool TryParse(string? protocolUrl, out string ticket, out string apiUrl)
+    public static bool TryParse(string? protocolUrl, out string ticket, out string env)
     {
         ticket = "";
-        apiUrl = "";
+        env = "";
         if (string.IsNullOrWhiteSpace(protocolUrl))
         {
             return false;
@@ -85,12 +85,29 @@ public static class ProtocolHandler
             {
                 ticket = value;
             }
+            else if (string.Equals(name, "env", StringComparison.OrdinalIgnoreCase))
+            {
+                env = value.Trim();
+            }
             else if (string.Equals(name, "api", StringComparison.OrdinalIgnoreCase))
             {
-                apiUrl = value.TrimEnd('/');
+                AppLog.Warn("Parámetro api= del protocolo ignorado");
             }
         }
 
-        return ticket.Length == 32 && !string.IsNullOrWhiteSpace(apiUrl);
+        if (ticket.Length != 32 || !ticket.All(static c => char.IsAsciiHexDigit(c)))
+        {
+            return false;
+        }
+
+        if (env.Length > 0
+            && !string.Equals(env, "prod", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(env, "local", StringComparison.OrdinalIgnoreCase))
+        {
+            AppLog.Warn($"env={env} no reconocido; se usa prod");
+            env = "prod";
+        }
+
+        return true;
     }
 }

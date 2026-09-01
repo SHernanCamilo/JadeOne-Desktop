@@ -148,7 +148,7 @@ public static class DataFileParser
                     continue;
                 }
 
-                row[col] = intern.Get(JsonToString(prop.Value));
+                SetCell(row, table.Columns[col]!, JsonToString(prop.Value), intern);
             }
 
             table.Rows.Add(row);
@@ -166,7 +166,8 @@ public static class DataFileParser
             var name = SanitizeColumn(prop.Name);
             if (!table.Columns.Contains(name))
             {
-                table.Columns.Add(UniqueColumn(table, name), typeof(string));
+                var unique = UniqueColumn(table, name);
+                table.Columns.Add(unique, ColumnType(unique));
             }
         }
     }
@@ -194,7 +195,7 @@ public static class DataFileParser
         foreach (var raw in headers)
         {
             var name = UniqueColumn(table, SanitizeColumn(raw), used);
-            table.Columns.Add(name, typeof(string));
+            table.Columns.Add(name, ColumnType(name));
             used.Add(name);
         }
 
@@ -215,7 +216,7 @@ public static class DataFileParser
                 var row = table.NewRow();
                 for (var i = 0; i < table.Columns.Count && i < values.Count; i++)
                 {
-                    row[i] = intern.Get(values[i]);
+                    SetCell(row, table.Columns[i], values[i], intern);
                 }
 
                 table.Rows.Add(row);
@@ -296,7 +297,7 @@ public static class DataFileParser
         foreach (var raw in headers)
         {
             var name = UniqueColumn(table, SanitizeColumn(raw), used);
-            table.Columns.Add(name, typeof(string));
+            table.Columns.Add(name, ColumnType(name));
             used.Add(name);
         }
 
@@ -316,7 +317,7 @@ public static class DataFileParser
                 var row = table.NewRow();
                 for (var c = 0; c < table.Columns.Count && c < values.Count; c++)
                 {
-                    row[c] = intern.Get(values[c]);
+                    SetCell(row, table.Columns[c], values[c], intern);
                 }
 
                 table.Rows.Add(row);
@@ -355,7 +356,7 @@ public static class DataFileParser
         foreach (var raw in knownColumns)
         {
             var name = UniqueColumn(table, SanitizeColumn(raw), used);
-            table.Columns.Add(name, typeof(string));
+            table.Columns.Add(name, ColumnType(name));
             used.Add(name);
         }
 
@@ -386,6 +387,101 @@ public static class DataFileParser
             ? l.ToString(CultureInfo.InvariantCulture)
             : value.GetRawText(),
         _ => value.GetRawText(),
+    };
+
+    public static bool IsFechaColumn(string name)
+    {
+        if (string.IsNullOrEmpty(name))
+        {
+            return false;
+        }
+
+        if (name.Contains("fecha", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // Abreviatura: FecNac, FEC_ALTA, x_FecIngreso. No pisa "Efectivo".
+        for (var i = 0; i <= name.Length - 3; i++)
+        {
+            if (!name.AsSpan(i, 3).Equals("fec", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var atStart = i == 0 || name[i - 1] is '_' or ' ' or '-';
+            var camel = i > 0 && char.IsUpper(name[i]) && char.IsLower(name[i - 1]);
+            if (atStart || camel)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static string FormatFecha(DateTime value) =>
+        value.TimeOfDay == TimeSpan.Zero
+            ? value.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture)
+            : value.ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture);
+
+    private static Type ColumnType(string name) =>
+        IsFechaColumn(name) ? typeof(DateTime) : typeof(string);
+
+    private static void SetCell(DataRow row, DataColumn col, string raw, StringInterner intern)
+    {
+        if (col.DataType == typeof(DateTime))
+        {
+            row[col] = TryParseFecha(raw, out var dt) ? dt : DBNull.Value;
+            return;
+        }
+
+        row[col] = intern.Get(raw);
+    }
+
+    internal static bool TryParseFecha(string? raw, out DateTime value)
+    {
+        value = default;
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return false;
+        }
+
+        var s = raw.Trim();
+        if (s.EndsWith("Z", StringComparison.OrdinalIgnoreCase))
+        {
+            s = s[..^1];
+        }
+
+        if (DateTime.TryParseExact(
+                s,
+                FechaFormats,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out value)
+            || DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.None, out value)
+            || DateTime.TryParse(s, CultureInfo.GetCultureInfo("es-CO"), DateTimeStyles.None, out value))
+        {
+            value = DateTime.SpecifyKind(value, DateTimeKind.Unspecified);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static readonly string[] FechaFormats =
+    {
+        "yyyy-MM-ddTHH:mm:ss",
+        "yyyy-MM-ddTHH:mm:ss.fff",
+        "yyyy-MM-ddTHH:mm:ss.FFFFFF",
+        "yyyy-MM-ddTHH:mm:ss.fffffff",
+        "yyyy-MM-ddTHH:mm:sszzz",
+        "yyyy-MM-dd HH:mm:ss",
+        "yyyy-MM-dd",
+        "dd/MM/yyyy",
+        "dd/MM/yyyy HH:mm",
+        "dd/MM/yyyy HH:mm:ss",
+        "dd-MM-yyyy",
     };
 
     private static string SanitizeColumn(string name)

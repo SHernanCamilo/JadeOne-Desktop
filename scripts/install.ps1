@@ -54,6 +54,7 @@ $shortcut = $shell.CreateShortcut($shortcutPath)
 $shortcut.TargetPath = $destExe
 $shortcut.WorkingDirectory = $destDir
 $shortcut.Description = "JadeOne Desktop"
+$shortcut.IconLocation = "$destExe,0"
 $shortcut.Save()
 
 Write-Host "Instalado en $destExe"

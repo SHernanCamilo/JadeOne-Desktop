@@ -12,8 +12,12 @@
     <Company>APPMT</Company>
     <Version>1.0.0</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\jadeone.ico</ApplicationIcon>
     <SatelliteResourceLanguages>es</SatelliteResourceLanguages>
   </PropertyGroup>
+  <ItemGroup>
+    <Resource Include="Assets\jadeone.png" />
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="MiniExcel" Version="1.41.3" />
   </ItemGroup>

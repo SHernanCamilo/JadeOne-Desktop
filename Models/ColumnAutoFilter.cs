@@ -2,14 +2,32 @@ using System.ComponentModel;
 
 namespace SaraBI.Models;
 
+public enum TextFilterOperator
+{
+    None,
+    Contains,
+    Equals,
+    NotEquals,
+    StartsWith,
+    EndsWith,
+    NotContains,
+}
+
 public sealed class ColumnAutoFilter
 {
     public HashSet<string>? Selected { get; set; }
     public bool IncludeBlanks { get; set; } = true;
-    public string? Contains { get; set; }
+    public TextFilterOperator TextOperator { get; set; }
+    public string? TextValue { get; set; }
+
+    public DateTime? DateFrom { get; set; }
+    public DateTime? DateTo { get; set; }
+
     public bool IsActive =>
-        !string.IsNullOrEmpty(Contains)
-        || (Selected is not null);
+        (!string.IsNullOrEmpty(TextValue) && TextOperator != TextFilterOperator.None)
+        || Selected is not null
+        || DateFrom is not null
+        || DateTo is not null;
 }
 
 public sealed class FilterValueItem : INotifyPropertyChanged

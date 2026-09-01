@@ -6,30 +6,23 @@ namespace SaraBI.Controls;
 
 public partial class ExcelColumnHeader : UserControl
 {
-    private static readonly Brush Idle = new SolidColorBrush(Color.FromRgb(0x6B, 0x72, 0x80));
-    private static readonly Brush Active = new SolidColorBrush(Color.FromRgb(0x21, 0x73, 0x46));
+    public static readonly DependencyProperty FilterActiveProperty =
+        DependencyProperty.RegisterAttached(
+            "FilterActive",
+            typeof(bool),
+            typeof(ExcelColumnHeader),
+            new FrameworkPropertyMetadata(false));
 
-    public string ColumnName { get; }
+    public static void SetFilterActive(DependencyObject element, bool value) =>
+        element.SetValue(FilterActiveProperty, value);
 
-    public event EventHandler? FilterClicked;
+    public static bool GetFilterActive(DependencyObject element) =>
+        (bool)element.GetValue(FilterActiveProperty);
 
-    public ExcelColumnHeader(string columnName)
+    public string ColumnName { get; } = "";
+
+    public ExcelColumnHeader()
     {
         InitializeComponent();
-        ColumnName = columnName;
-        TitleBlock.Text = columnName;
-        FilterIcon.Fill = Idle;
-    }
-
-    public void SetFilterActive(bool active)
-    {
-        FilterIcon.Fill = active ? Active : Idle;
-        FilterButton.ToolTip = active ? "Filtro activo — clic para editar" : "Filtro de columna";
-    }
-
-    private void OnFilterClick(object sender, RoutedEventArgs e)
-    {
-        e.Handled = true;
-        FilterClicked?.Invoke(this, EventArgs.Empty);
     }
 }

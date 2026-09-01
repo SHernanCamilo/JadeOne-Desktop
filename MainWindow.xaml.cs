@@ -6,10 +6,12 @@ using System.IO;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
-using Microsoft.Win32;
+using System.Windows.Threading;
 using SaraBI.Controls;
+using SaraBI.Converters;
 using SaraBI.Dialogs;
 using SaraBI.Models;
 using SaraBI.Services;
@@ -28,8 +30,13 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _loadCts;
     private LaunchSession? _session;
     private readonly Stopwatch _elapsed = new();
-    private bool _showTotals;
     private readonly Dictionary<string, ColumnAutoFilter> _columnFilters = new(StringComparer.OrdinalIgnoreCase);
+    private ExcelAutoFilterWindow? _openFilter;
+    private string? _openFilterColumn;
+    private readonly List<WorkbookSheet> _sheets = new();
+    private WorkbookSheet? _activeSheet;
+    private bool _didRestorePivots;
+    private DispatcherTimer? _pivotSaveTimer;
 
     public MainWindow(string? protocolUrl)
     {
@@ -38,15 +45,25 @@ public partial class MainWindow : Window
         Loaded += OnLoaded;
         Closed += (_, _) =>
         {
+            _pivotSaveTimer?.Stop();
+            SavePivotsNow();
+            _openFilter?.Close();
             _loadCts?.Cancel();
+            foreach (var sheet in _sheets)
+            {
+                sheet.Result?.Dispose();
+            }
+
             _api.Dispose();
         };
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        if (string.IsNullOrWhiteSpace(_protocolUrl))
+        if (string.IsNullOrWhiteSpace(_protocolUrl)
+            || !ProtocolHandler.TryParse(_protocolUrl, out _, out _))
         {
+            BlockDirectLaunch();
             return;
         }
 
@@ -54,24 +71,48 @@ public partial class MainWindow : Window
         await LoadFromProtocolAsync(_protocolUrl);
     }
 
+    private void BlockDirectLaunch()
+    {
+        AppLog.Warn($"Arranque sin enlace web args={_protocolUrl ?? "(ninguno)"}");
+        MessageBox.Show(
+            this,
+            "No se puede usar JadeOne Desktop desde Excel ni ejecutando el programa directo.\n\n"
+            + "Ábralo desde JadeOne en el navegador: entre a la plataforma, abra la vista y use el botón de escritorio.",
+            "Abra JadeOne desde el navegador",
+            MessageBoxButton.OK,
+            MessageBoxImage.Warning);
+        Close();
+    }
+
+    private bool RequireBrowserSession()
+    {
+        if (_session is not null)
+        {
+            return true;
+        }
+
+        BlockDirectLaunch();
+        return false;
+    }
+
     private async Task LoadFromProtocolAsync(string protocolUrl)
     {
-        if (!ProtocolHandler.TryParse(protocolUrl, out var ticket, out var apiUrl))
+        if (!ProtocolHandler.TryParse(protocolUrl, out var ticket, out var env))
         {
-            ShowError("El enlace de escritorio no es válido. Vuelva a abrir la vista desde la plataforma.");
+            BlockDirectLaunch();
             return;
         }
 
+        var apiUrl = OfficialApi.Resolve(env);
         ShowOverlay("Conectando...", "Canjeando ticket de sesión", true);
         try
         {
             _session = await _api.ClaimAsync(apiUrl, ticket, CancellationToken.None);
-            AppLog.Info($"Claim OK user={_session.User} view={_session.Schema}.{_session.View} api={_session.ApiUrl}");
+            AppLog.Info($"Claim OK user={_session.User} view={_session.Schema}.{_session.View} env={env} api={_session.ApiUrl}");
             TitleText.Text = _session.ViewLabel;
             SubtitleText.Text = $"{_session.Schema}.{_session.View}"
                                 + (string.IsNullOrWhiteSpace(_session.User) ? "" : $"  ·  {_session.User}");
             Title = $"JadeOne Desktop — {_session.ViewLabel}";
-            SheetTabText.Text = _session.ViewLabel;
             EmptyTitle.Text = _session.ViewLabel;
             SavedBadge.Text = "Guardado";
             await LoadDataAsync();
@@ -84,7 +125,7 @@ public partial class MainWindow : Window
 
     private async void OnRefresh(object sender, RoutedEventArgs e)
     {
-        if (_session is null)
+        if (!RequireBrowserSession())
         {
             return;
         }
@@ -99,8 +140,6 @@ public partial class MainWindow : Window
         var ct = _loadCts.Token;
         _elapsed.Restart();
         RefreshButton.IsEnabled = false;
-        ExportButton.IsEnabled = false;
-        CsvButton.IsEnabled = false;
         CancelButton.IsEnabled = true;
 
         try
@@ -183,8 +222,6 @@ public partial class MainWindow : Window
             HideOverlay();
             EmptyState.Visibility = Visibility.Collapsed;
             RefreshButton.IsEnabled = true;
-            ExportButton.IsEnabled = table.Rows.Count > 0;
-            CsvButton.IsEnabled = table.Rows.Count > 0;
             CancelButton.IsEnabled = false;
             _elapsed.Stop();
             UpdateMetrics();
@@ -300,13 +337,47 @@ public partial class MainWindow : Window
         return true;
     }
 
+    private bool IsPivotSheet => _activeSheet?.IsPivot == true;
+
     private void BindTable(DataTable table)
     {
+        _openFilter?.Close();
         _columnFilters.Clear();
         _table?.Dispose();
         _table = table;
         _view = table.DefaultView;
-        Grid.ItemsSource = _view;
+        EnsureDataSheet();
+        WorkbookSheet? prefer = null;
+        if (!_didRestorePivots)
+        {
+            prefer = TryRestorePivots();
+            _didRestorePivots = true;
+        }
+        else if (_activeSheet is not null && _sheets.Contains(_activeSheet))
+        {
+            prefer = _activeSheet;
+        }
+
+        RebuildAllPivots(bindActive: false);
+        ActivateSheet(prefer ?? _sheets.First(s => !s.IsPivot));
+    }
+
+    private void EnsureDataSheet()
+    {
+        var data = _sheets.FirstOrDefault(s => !s.IsPivot);
+        if (data is null)
+        {
+            data = new WorkbookSheet
+            {
+                Name = string.IsNullOrWhiteSpace(_session?.ViewLabel) ? "Datos" : _session!.ViewLabel,
+                IsPivot = false,
+            };
+            _sheets.Insert(0, data);
+        }
+        else if (!string.IsNullOrWhiteSpace(_session?.ViewLabel))
+        {
+            data.Name = _session.ViewLabel;
+        }
     }
 
     private void OnSearchChanged(object sender, TextChangedEventArgs e)
@@ -361,67 +432,11 @@ public partial class MainWindow : Window
         {
             _view.RowFilter = string.Join(" AND ", parts);
             UpdateMetrics();
+            RebuildAllPivots();
         }
         catch
         {
             _view.RowFilter = "";
-        }
-    }
-
-    private void OnExportExcel(object sender, RoutedEventArgs e)
-    {
-        if (_view is null)
-        {
-            return;
-        }
-
-        var dialog = new SaveFileDialog
-        {
-            Filter = "Excel (*.xlsx)|*.xlsx",
-            FileName = $"{_session?.View ?? "vista"}_{DateTime.Now:yyyyMMdd_HHmm}.xlsx",
-        };
-        if (dialog.ShowDialog(this) != true)
-        {
-            return;
-        }
-
-        try
-        {
-            var table = _view.ToTable();
-            ExcelExporter.Save(table, dialog.FileName);
-            StatusText.Text = $"Exportado: {Path.GetFileName(dialog.FileName)}";
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, ex.Message, "Error al exportar", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
-
-    private void OnExportCsv(object sender, RoutedEventArgs e)
-    {
-        if (_view is null)
-        {
-            return;
-        }
-
-        var dialog = new SaveFileDialog
-        {
-            Filter = "CSV (*.csv)|*.csv",
-            FileName = $"{_session?.View ?? "vista"}_{DateTime.Now:yyyyMMdd_HHmm}.csv",
-        };
-        if (dialog.ShowDialog(this) != true)
-        {
-            return;
-        }
-
-        try
-        {
-            ExcelExporter.SaveCsv(_view.ToTable(), dialog.FileName);
-            StatusText.Text = $"Exportado: {Path.GetFileName(dialog.FileName)}";
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, ex.Message, "Error al exportar", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -436,16 +451,22 @@ public partial class MainWindow : Window
         filters += _columnFilters.Count;
 
         var gcMb = Math.Round(GC.GetTotalMemory(false) / 1024d / 1024d, 1);
+        var pivotBit = IsPivotSheet && _activeSheet?.Result is not null
+            ? $"   {_activeSheet.Result.Rows.Count:N0} grupos"
+            : "";
         MetricsText.Text = total == 0
             ? "— total   — mostrados   0 filtro(s)"
-            : $"{total:N0} total   {filtered:N0} mostrados   {filters} filtro(s)   {gcMb} MB CLR";
+            : $"{total:N0} total   {filtered:N0} mostrados   {filters} filtro(s){pivotBit}   {gcMb} MB CLR";
 
         if (_elapsed.IsRunning || _elapsed.Elapsed.TotalSeconds > 0)
         {
-            HintText.Text = $"{_elapsed.Elapsed.TotalSeconds:0} seg. carga";
+            var load = $"{_elapsed.Elapsed.TotalSeconds:0} seg. carga";
+            HintText.Text = _sheets.Count > 1 ? $"{_sheets.Count} hojas · {load}" : load;
         }
-
-        UpdateTotals();
+        else if (_sheets.Count > 1)
+        {
+            HintText.Text = $"{_sheets.Count} hojas";
+        }
     }
 
     private void ShowOverlay(string title, string message, bool indeterminate)
@@ -479,9 +500,6 @@ public partial class MainWindow : Window
 
         RibbonDatos.Visibility = TabDatos.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         RibbonFiltros.Visibility = TabFiltros.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
-        RibbonVista.Visibility = TabVista.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
-        RibbonFormato.Visibility = TabFormato.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
-        RibbonFormulas.Visibility = TabFormulas.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         RibbonAnalisis.Visibility = TabAnalisis.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -490,8 +508,464 @@ public partial class MainWindow : Window
         TabFiltros.IsChecked = true;
     }
 
+    private void OnShowPivot(object sender, RoutedEventArgs e)
+    {
+        if (!RequireBrowserSession())
+        {
+            return;
+        }
+
+        if (_table is null || _view is null)
+        {
+            MessageBox.Show(this,
+                "Cargue primero una vista (Datos → Actualizar todo) para armar la tabla dinámica.",
+                "Tabla dinámica", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        EnsureDataSheet();
+        var n = _sheets.Count(s => s.IsPivot) + 1;
+        var sheet = new WorkbookSheet
+        {
+            Name = n == 1 ? "Tabla dinámica1" : $"Tabla dinámica{n}",
+            IsPivot = true,
+        };
+        _sheets.Add(sheet);
+        ActivateSheet(sheet);
+        StatusText.Text = "Hoja nueva. Arrastre campos a Filas, Columnas o Valores.";
+        ScheduleSavePivots();
+    }
+
+    private void OnSheetTabClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: WorkbookSheet sheet })
+        {
+            ActivateSheet(sheet);
+            ScheduleSavePivots();
+        }
+    }
+
+    private void OnCloseSheetTab(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is not FrameworkElement { Tag: WorkbookSheet sheet } || !sheet.IsPivot)
+        {
+            return;
+        }
+
+        var index = _sheets.IndexOf(sheet);
+        sheet.Result?.Dispose();
+        _sheets.Remove(sheet);
+        var next = _activeSheet == sheet
+            ? (index > 0 ? _sheets[index - 1] : _sheets[0])
+            : _activeSheet;
+        if (next is not null)
+        {
+            ActivateSheet(next);
+        }
+        else
+        {
+            RefreshSheetTabs();
+        }
+
+        ScheduleSavePivots();
+    }
+
+    private void ActivateSheet(WorkbookSheet sheet)
+    {
+        foreach (var s in _sheets)
+        {
+            s.IsActive = ReferenceEquals(s, sheet);
+        }
+
+        _activeSheet = sheet;
+        RefreshSheetTabs();
+        _openFilter?.Close();
+
+        if (sheet.IsPivot)
+        {
+            if (_table is not null && _view is not null)
+            {
+                PivotSidebar.AttachConfig(sheet.Config);
+                PivotSidebar.SetFields(_table.Columns.Cast<DataColumn>().Select(c => c.ColumnName), _view);
+            }
+
+            PivotSidebar.Visibility = Visibility.Visible;
+            Grid.ItemsSource = sheet.Result?.DefaultView;
+            TabAnalisis.IsChecked = true;
+            StatusText.Text = sheet.Config.CanBuild
+                ? $"Tabla dinámica · {sheet.Snapshot?.LeafCount ?? sheet.Result?.Rows.Count ?? 0:N0} grupos"
+                : "Arrastre campos a Filas, Columnas o Valores.";
+        }
+        else
+        {
+            PivotSidebar.Visibility = Visibility.Collapsed;
+            if (_view is not null)
+            {
+                Grid.ItemsSource = _view;
+            }
+
+            TabDatos.IsChecked = true;
+            StatusText.Text = $"{_view?.Count ?? 0:N0} registros";
+        }
+
+        UpdateMetrics();
+    }
+
+    private void RefreshSheetTabs()
+    {
+        if (SheetTabStrip is null)
+        {
+            return;
+        }
+
+        SheetTabStrip.ItemsSource = null;
+        SheetTabStrip.ItemsSource = _sheets.ToList();
+    }
+
+    private void OnClearPivot(object sender, RoutedEventArgs e)
+    {
+        ClearActivePivot();
+    }
+
+    private void OnPivotCleared(object? sender, EventArgs e) => ClearActivePivot();
+
+    private void ClearActivePivot()
+    {
+        if (_activeSheet is not { IsPivot: true })
+        {
+            return;
+        }
+
+        PivotSidebar.Reset();
+        _activeSheet.Result?.Dispose();
+        _activeSheet.Result = null;
+        _activeSheet.Snapshot = null;
+        Grid.ItemsSource = null;
+        UpdateMetrics();
+        StatusText.Text = "Tabla dinámica limpiada. Arrastre campos para volver a armarla.";
+        ScheduleSavePivots();
+    }
+
+    private void OnPivotClosed(object? sender, EventArgs e)
+    {
+        PivotSidebar.Visibility = Visibility.Collapsed;
+    }
+
+    private void OnPivotConfigChanged(object? sender, EventArgs e)
+    {
+        RebuildPivot();
+        ScheduleSavePivots();
+    }
+
+    private void OnSavePivot(object sender, RoutedEventArgs e)
+    {
+        if (!RequireBrowserSession())
+        {
+            return;
+        }
+
+        if (_session is null)
+        {
+            return;
+        }
+
+        if (!_sheets.Any(s => s.IsPivot && s.Config.CanBuild))
+        {
+            MessageBox.Show(this,
+                "Arme primero una tabla dinámica (Filas, Columnas o Valores) para guardarla en este equipo.",
+                "Guardar tabla dinámica", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        if (SavePivotsNow())
+        {
+            SavedBadge.Text = "Tabla guardada";
+            StatusText.Text = "Tabla dinámica guardada en este equipo. Se abrirá sola al volver a esta vista.";
+        }
+    }
+
+    private void OnOpenSavedPivot(object sender, RoutedEventArgs e)
+    {
+        if (!RequireBrowserSession() || _session is null)
+        {
+            return;
+        }
+
+        if (_table is null || _view is null)
+        {
+            MessageBox.Show(this,
+                "Cargue primero la vista para abrir la tabla dinámica guardada.",
+                "Abrir tabla dinámica", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        if (!PivotStateStore.Exists(_session))
+        {
+            MessageBox.Show(this,
+                "No hay una tabla dinámica guardada en este equipo para esta vista.",
+                "Abrir tabla dinámica", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        EnsureDataSheet();
+        RemovePivotSheets();
+        var opened = TryRestorePivots();
+        if (opened is null)
+        {
+            MessageBox.Show(this,
+                "El archivo guardado no tiene campos que coincidan con esta vista.",
+                "Abrir tabla dinámica", MessageBoxButton.OK, MessageBoxImage.Warning);
+            ActivateSheet(_sheets.First(s => !s.IsPivot));
+            return;
+        }
+
+        RebuildAllPivots(bindActive: false);
+        ActivateSheet(opened);
+        SavedBadge.Text = "Tabla guardada";
+        StatusText.Text = "Tabla dinámica restaurada desde este equipo.";
+    }
+
+    private WorkbookSheet? TryRestorePivots()
+    {
+        if (_session is null || _table is null)
+        {
+            return null;
+        }
+
+        var saved = PivotStateStore.Load(_session);
+        if (saved is null)
+        {
+            return null;
+        }
+
+        string? MapColumn(string name) =>
+            _table.Columns.Cast<DataColumn>()
+                .FirstOrDefault(c => string.Equals(c.ColumnName, name, StringComparison.OrdinalIgnoreCase))
+                ?.ColumnName;
+
+        WorkbookSheet? firstBuilt = null;
+        WorkbookSheet? namedActive = null;
+        foreach (var item in saved.PivotSheets)
+        {
+            var sheet = new WorkbookSheet
+            {
+                Name = string.IsNullOrWhiteSpace(item.Name) ? "Tabla dinámica" : item.Name,
+                IsPivot = true,
+            };
+            sheet.Config.ApplySaved(item.Config, MapColumn);
+            if (_view is not null)
+            {
+                sheet.Config.ExpandBareDateFields(_table, _view);
+            }
+
+            if (!sheet.Config.CanBuild)
+            {
+                continue;
+            }
+
+            _sheets.Add(sheet);
+            firstBuilt ??= sheet;
+            if (!string.IsNullOrWhiteSpace(saved.ActiveSheetName)
+                && string.Equals(sheet.Name, saved.ActiveSheetName, StringComparison.OrdinalIgnoreCase))
+            {
+                namedActive = sheet;
+            }
+        }
+
+        var target = namedActive ?? firstBuilt;
+        if (target is not null)
+        {
+            SavedBadge.Text = "Tabla guardada";
+            AppLog.Info($"Tabla dinámica restaurada {_session.Schema}.{_session.View} sheets={_sheets.Count(s => s.IsPivot)}");
+        }
+
+        return target;
+    }
+
+    private void RemovePivotSheets()
+    {
+        foreach (var sheet in _sheets.Where(s => s.IsPivot).ToList())
+        {
+            sheet.Result?.Dispose();
+            _sheets.Remove(sheet);
+        }
+    }
+
+    private void ScheduleSavePivots()
+    {
+        if (_session is null)
+        {
+            return;
+        }
+
+        _pivotSaveTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(800) };
+        _pivotSaveTimer.Tick -= OnPivotSaveTick;
+        _pivotSaveTimer.Tick += OnPivotSaveTick;
+        _pivotSaveTimer.Stop();
+        _pivotSaveTimer.Start();
+    }
+
+    private void OnPivotSaveTick(object? sender, EventArgs e)
+    {
+        _pivotSaveTimer?.Stop();
+        SavePivotsNow();
+    }
+
+    private bool SavePivotsNow()
+    {
+        if (_session is null)
+        {
+            return false;
+        }
+
+        var built = _sheets.Where(s => s.IsPivot && s.Config.CanBuild).ToList();
+        if (built.Count == 0)
+        {
+            PivotStateStore.Delete(_session);
+            return false;
+        }
+
+        try
+        {
+            var state = new SavedPivotState
+            {
+                Schema = _session.Schema,
+                View = _session.View,
+                ViewLabel = _session.ViewLabel,
+                User = _session.User,
+                SavedAt = DateTime.Now,
+                ActiveSheetName = _activeSheet is { IsPivot: true } ? _activeSheet.Name : built[0].Name,
+                PivotSheets = built.Select(s => new SavedPivotSheet
+                {
+                    Name = s.Name,
+                    Config = s.Config.ToSaved(),
+                }).ToList(),
+            };
+            PivotStateStore.Save(_session, state);
+            SavedBadge.Text = "Tabla guardada";
+            return true;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("No se pudo guardar la tabla dinámica local", ex);
+            return false;
+        }
+    }
+
+    private void RebuildAllPivots(bool bindActive = true)
+    {
+        if (_view is null)
+        {
+            return;
+        }
+
+        foreach (var sheet in _sheets.Where(s => s.IsPivot && s.Config.CanBuild))
+        {
+            ApplyPivotBuild(sheet, PivotEngine.Build(_view, sheet.Config));
+        }
+
+        if (bindActive && _activeSheet?.IsPivot == true)
+        {
+            Grid.ItemsSource = _activeSheet.Result?.DefaultView;
+        }
+    }
+
+    private void RebuildPivot()
+    {
+        if (_view is null || _activeSheet is not { IsPivot: true } sheet)
+        {
+            return;
+        }
+
+        if (!sheet.Config.CanBuild)
+        {
+            sheet.Result?.Dispose();
+            sheet.Result = null;
+            sheet.Snapshot = null;
+            Grid.ItemsSource = null;
+            StatusText.Text = "Arrastre campos a Filas, Columnas o Valores.";
+            UpdateMetrics();
+            return;
+        }
+
+        Mouse.OverrideCursor = Cursors.Wait;
+        try
+        {
+            ApplyPivotBuild(sheet, PivotEngine.Build(_view, sheet.Config));
+            Grid.ItemsSource = sheet.Result?.DefaultView;
+            var groups = sheet.Snapshot?.LeafCount ?? sheet.Result?.Rows.Count ?? 0;
+            StatusText.Text = $"Tabla dinámica · {groups:N0} grupos"
+                              + (sheet.Config.Columns.Count > 0
+                                  ? $" (máx. {PivotEngine.MaxCrossColumns} columnas)"
+                                  : "");
+            UpdateMetrics();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Tabla dinámica", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+        }
+    }
+
+    private static void ApplyPivotBuild(WorkbookSheet sheet, PivotBuild built)
+    {
+        sheet.Result?.Dispose();
+        sheet.Result = built.Table;
+        sheet.Snapshot = built.Snapshot;
+    }
+
+    private void OnPivotOutlineClick(object sender, MouseButtonEventArgs e)
+    {
+        if (!IsPivotSheet || _activeSheet?.Snapshot is not { Outline: true } snapshot)
+        {
+            return;
+        }
+
+        var cell = FindAncestor<DataGridCell>(e.OriginalSource as DependencyObject);
+        if (cell?.Column is null || cell.DataContext is not DataRowView row)
+        {
+            return;
+        }
+
+        var name = cell.Column.SortMemberPath;
+        if (string.IsNullOrEmpty(name) && cell.Column.Header is string header)
+        {
+            name = header;
+        }
+
+        if (!string.Equals(name, PivotEngine.OutlineColumn, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (!row.Row.Table.Columns.Contains(PivotEngine.KidsColumn)
+            || row[PivotEngine.KidsColumn] is not true)
+        {
+            return;
+        }
+
+        var path = Convert.ToString(row[PivotEngine.PathColumn], CultureInfo.InvariantCulture) ?? "";
+        if (path.Length == 0)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        _activeSheet.Config.ToggleExpand(path);
+        var next = PivotEngine.Flatten(snapshot, _activeSheet.Config.ExpandedPaths);
+        _activeSheet.Result?.Dispose();
+        _activeSheet.Result = next;
+        Grid.ItemsSource = next.DefaultView;
+        UpdateMetrics();
+    }
+
     private void OnClearFilters(object sender, RoutedEventArgs e)
     {
+        _openFilter?.Close();
         SearchBox.Text = "";
         ColumnFilterBox.Text = "";
         _columnFilters.Clear();
@@ -507,34 +981,14 @@ public partial class MainWindow : Window
 
     private void OnAddViewHint(object sender, RoutedEventArgs e)
     {
-        MessageBox.Show(this,
-            "En escritorio se abre una vista desde el listado web (botón escritorio). Para varias hojas use la vista Excel en el navegador.",
-            "Agregar vista", MessageBoxButton.OK, MessageBoxImage.Information);
-    }
-
-    private void OnFreeze(object sender, RoutedEventArgs e) => Grid.FrozenColumnCount = Math.Min(2, Grid.Columns.Count);
-
-    private void OnUnfreeze(object sender, RoutedEventArgs e) => Grid.FrozenColumnCount = 0;
-
-    private void OnToggleTotals(object sender, RoutedEventArgs e)
-    {
-        _showTotals = !_showTotals;
-        TotalsBar.Visibility = _showTotals ? Visibility.Visible : Visibility.Collapsed;
-        UpdateTotals();
-    }
-
-    private void OnZoomChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-    {
-        if (GridZoom is null || ZoomLabel is null || ZoomStatus is null)
+        if (!RequireBrowserSession())
         {
             return;
         }
 
-        var scale = e.NewValue / 100d;
-        GridZoom.ScaleX = scale;
-        GridZoom.ScaleY = scale;
-        ZoomLabel.Text = $"{e.NewValue:0}%";
-        ZoomStatus.Text = $"{e.NewValue:0}%";
+        MessageBox.Show(this,
+            "La hoja de datos se abre desde el listado web. Use Tabla dinámica para crear otra hoja y armar el análisis, como en Excel.",
+            "Agregar vista", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     private void OnLoadingRow(object sender, DataGridRowEventArgs e)
@@ -544,13 +998,24 @@ public partial class MainWindow : Window
 
     private void OnAutoGeneratingColumn(object sender, DataGridAutoGeneratingColumnEventArgs e)
     {
-        e.Column.MinWidth = 88;
         var name = e.PropertyName;
-        var header = new ExcelColumnHeader(name);
-        header.SetFilterActive(_columnFilters.ContainsKey(name));
-        header.FilterClicked += OnColumnHeaderFilter;
-        e.Column.Header = header;
+        if (PivotEngine.IsHiddenColumn(name))
+        {
+            e.Cancel = true;
+            return;
+        }
+
+        e.Column.MinWidth = 88;
+        e.Column.Header = name;
+        if (string.Equals(name, PivotEngine.OutlineColumn, StringComparison.Ordinal))
+        {
+            e.Column.CanUserSort = false;
+            e.Column.MinWidth = 180;
+        }
         e.Column.SortMemberPath = name;
+        ExcelColumnHeader.SetFilterActive(
+            e.Column,
+            _columnFilters.TryGetValue(name, out var existing) && existing.IsActive);
         if (e.Column is DataGridTextColumn text)
         {
             text.ElementStyle = new Style(typeof(TextBlock))
@@ -561,6 +1026,13 @@ public partial class MainWindow : Window
                     new Setter(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center),
                 },
             };
+            if (e.PropertyType == typeof(DateTime) || DataFileParser.IsFechaColumn(name))
+            {
+                text.Binding = new Binding(name)
+                {
+                    Converter = FechaDisplayConverter.Instance,
+                };
+            }
         }
     }
 
@@ -577,49 +1049,22 @@ public partial class MainWindow : Window
         var colLetter = ColLetter(colIndex);
         var rowIndex = Grid.Items.IndexOf(Grid.CurrentItem) + 1;
         var name = Grid.CurrentCell.Column.SortMemberPath;
-        if (string.IsNullOrEmpty(name) && Grid.CurrentCell.Column.Header is ExcelColumnHeader header)
+        if (string.IsNullOrEmpty(name) && Grid.CurrentCell.Column.Header is string headerName)
         {
-            name = header.ColumnName;
+            name = headerName;
         }
 
         CellRefText.Text = $"{colLetter}{Math.Max(rowIndex, 1)}";
-        FormulaBox.Text = !string.IsNullOrEmpty(name) && row.Row.Table.Columns.Contains(name)
-            ? Convert.ToString(row[name], CultureInfo.CurrentCulture) ?? ""
-            : "";
-    }
-
-    private void UpdateTotals()
-    {
-        if (!_showTotals || _view is null || _table is null)
+        if (string.IsNullOrEmpty(name) || !row.Row.Table.Columns.Contains(name))
         {
-            TotalsText.Text = "";
+            FormulaBox.Text = "";
             return;
         }
 
-        var numeric = _table.Columns.Cast<DataColumn>()
-            .Where(c => c.DataType == typeof(int) || c.DataType == typeof(long)
-                        || c.DataType == typeof(decimal) || c.DataType == typeof(double)
-                        || c.DataType == typeof(float))
-            .Take(4)
-            .ToList();
-
-        var parts = new List<string> { $"Σ  {_view.Count:N0} filas" };
-        foreach (var col in numeric)
-        {
-            decimal sum = 0;
-            foreach (DataRowView row in _view)
-            {
-                if (row[col.ColumnName] is not DBNull and not null
-                    && decimal.TryParse(Convert.ToString(row[col.ColumnName], CultureInfo.InvariantCulture), out var n))
-                {
-                    sum += n;
-                }
-            }
-
-            parts.Add($"{col.ColumnName}={sum:N0}");
-        }
-
-        TotalsText.Text = string.Join("   ·   ", parts);
+        var cell = row[name];
+        FormulaBox.Text = cell is DateTime dt
+            ? DataFileParser.FormatFecha(dt)
+            : Convert.ToString(cell, CultureInfo.CurrentCulture) ?? "";
     }
 
     private static string ColLetter(int index)
@@ -641,11 +1086,47 @@ public partial class MainWindow : Window
         return letters.ToString();
     }
 
-    private void OnColumnHeaderFilter(object? sender, EventArgs e)
+    private void OnColumnHeaderFilterClick(object sender, RoutedEventArgs e)
     {
-        if (sender is not ExcelColumnHeader header || _table is null)
+        e.Handled = true;
+        if (IsPivotSheet)
         {
             return;
+        }
+
+        if (sender is not FrameworkElement fe)
+        {
+            return;
+        }
+
+        var colHeader = FindAncestor<System.Windows.Controls.Primitives.DataGridColumnHeader>(fe);
+        var name = colHeader?.Column?.SortMemberPath;
+        if (string.IsNullOrEmpty(name) && colHeader?.Column?.Header is string headerName)
+        {
+            name = headerName;
+        }
+
+        if (!string.IsNullOrEmpty(name))
+        {
+            OpenColumnFilter(name, fe);
+        }
+    }
+
+    private void OpenColumnFilter(string columnName, FrameworkElement anchor)
+    {
+        if (_table is null)
+        {
+            return;
+        }
+
+        if (_openFilter is not null)
+        {
+            var sameColumn = string.Equals(_openFilterColumn, columnName, StringComparison.Ordinal);
+            _openFilter.Close();
+            if (sameColumn)
+            {
+                return;
+            }
         }
 
         Mouse.OverrideCursor = Cursors.Wait;
@@ -653,43 +1134,63 @@ public partial class MainWindow : Window
         bool textOnly;
         try
         {
-            (items, textOnly) = CollectFilterValues(header.ColumnName);
+            (items, textOnly) = CollectFilterValues(columnName);
         }
         finally
         {
             Mouse.OverrideCursor = null;
         }
 
-        _columnFilters.TryGetValue(header.ColumnName, out var current);
-        var win = new ExcelAutoFilterWindow(header.ColumnName, items, current, textOnly)
+        _columnFilters.TryGetValue(columnName, out var current);
+        var isDate = DataFileParser.IsFechaColumn(columnName)
+                     || (_table.Columns.Contains(columnName)
+                         && _table.Columns[columnName]!.DataType == typeof(DateTime));
+        var win = new ExcelAutoFilterWindow(columnName, items, current, textOnly, isDate)
         {
             Owner = this,
         };
-        PlaceBelow(win, header);
-        if (win.ShowDialog() != true)
+        win.Closed += (_, _) =>
         {
-            return;
-        }
+            if (ReferenceEquals(_openFilter, win))
+            {
+                _openFilter = null;
+                _openFilterColumn = null;
+            }
 
+            if (win.Accepted)
+            {
+                ApplyAutoFilterResult(columnName, win);
+            }
+        };
+
+        PlaceBelow(win, anchor);
+        _openFilter = win;
+        _openFilterColumn = columnName;
+        win.Show();
+        win.Activate();
+    }
+
+    private void ApplyAutoFilterResult(string columnName, ExcelAutoFilterWindow win)
+    {
         if (win.Sort is { } dir && _view is not null)
         {
-            var safe = EscapeCol(header.ColumnName);
+            var safe = EscapeCol(columnName);
             _view.Sort = $"[{safe}] {(dir == ListSortDirection.Ascending ? "ASC" : "DESC")}";
         }
 
         if (win.Cleared)
         {
-            _columnFilters.Remove(header.ColumnName);
+            _columnFilters.Remove(columnName);
         }
         else if (win.Sort is null)
         {
             if (win.Result is null)
             {
-                _columnFilters.Remove(header.ColumnName);
+                _columnFilters.Remove(columnName);
             }
             else
             {
-                _columnFilters[header.ColumnName] = win.Result;
+                _columnFilters[columnName] = win.Result;
             }
         }
 
@@ -711,7 +1212,19 @@ public partial class MainWindow : Window
         foreach (DataRow row in _table.Rows)
         {
             var raw = row[column];
-            var s = raw is DBNull or null ? "" : Convert.ToString(raw, CultureInfo.CurrentCulture) ?? "";
+            string s;
+            if (raw is DBNull or null)
+            {
+                s = "";
+            }
+            else if (raw is DateTime dt)
+            {
+                s = DataFileParser.FormatFecha(dt);
+            }
+            else
+            {
+                s = Convert.ToString(raw, CultureInfo.CurrentCulture) ?? "";
+            }
             if (s.Length == 0)
             {
                 blanks = true;
@@ -738,16 +1251,41 @@ public partial class MainWindow : Window
 
     private string? BuildExcelFilter(string column, ColumnAutoFilter filter)
     {
-        if (!_table?.Columns.Contains(column) ?? true)
+        if (_table is null || !_table.Columns.Contains(column))
         {
             return null;
         }
 
-        var name = $"CONVERT([{EscapeCol(column)}], 'System.String')";
+        var col = _table.Columns[column];
+        var isDate = col.DataType == typeof(DateTime);
+        var name = isDate
+            ? $"[{EscapeCol(column)}]"
+            : $"CONVERT([{EscapeCol(column)}], 'System.String')";
         var parts = new List<string>();
-        if (!string.IsNullOrEmpty(filter.Contains))
+        if (filter.DateFrom is DateTime from)
         {
-            parts.Add($"{name} LIKE '%{EscapeFilter(filter.Contains)}%'");
+            parts.Add($"{name} >= #{from:MM/dd/yyyy}#");
+        }
+
+        if (filter.DateTo is DateTime to)
+        {
+            parts.Add($"{name} < #{to.Date.AddDays(1):MM/dd/yyyy}#");
+        }
+
+        if (filter.TextOperator != TextFilterOperator.None && !string.IsNullOrEmpty(filter.TextValue))
+        {
+            var textCol = $"CONVERT([{EscapeCol(column)}], 'System.String')";
+            var escaped = EscapeFilter(filter.TextValue);
+            var literal = filter.TextValue.Replace("'", "''");
+            parts.Add(filter.TextOperator switch
+            {
+                TextFilterOperator.Equals => $"{textCol} = '{literal}'",
+                TextFilterOperator.NotEquals => $"{textCol} <> '{literal}'",
+                TextFilterOperator.StartsWith => $"{textCol} LIKE '{escaped}%'",
+                TextFilterOperator.EndsWith => $"{textCol} LIKE '%{escaped}'",
+                TextFilterOperator.NotContains => $"NOT ({textCol} LIKE '%{escaped}%')",
+                _ => $"{textCol} LIKE '%{escaped}%'",
+            });
         }
 
         if (filter.Selected is not null)
@@ -755,13 +1293,26 @@ public partial class MainWindow : Window
             var valueParts = new List<string>();
             if (filter.IncludeBlanks)
             {
-                valueParts.Add($"{name} = ''");
+                valueParts.Add(isDate ? $"{name} IS NULL" : $"{name} = ''");
             }
 
             foreach (var chunk in filter.Selected.Chunk(200))
             {
-                var listed = string.Join(",", chunk.Select(v => $"'{v.Replace("'", "''")}'"));
-                valueParts.Add($"{name} IN ({listed})");
+                if (isDate)
+                {
+                    foreach (var v in chunk)
+                    {
+                        if (DataFileParser.TryParseFecha(v, out var dt))
+                        {
+                            valueParts.Add($"{name} = #{dt:MM/dd/yyyy HH:mm:ss}#");
+                        }
+                    }
+                }
+                else
+                {
+                    var listed = string.Join(",", chunk.Select(v => $"'{v.Replace("'", "''")}'"));
+                    valueParts.Add($"{name} IN ({listed})");
+                }
             }
 
             parts.Add(valueParts.Count == 0 ? "1=0" : "(" + string.Join(" OR ", valueParts) + ")");
@@ -774,11 +1325,36 @@ public partial class MainWindow : Window
     {
         foreach (var col in Grid.Columns)
         {
-            if (col.Header is ExcelColumnHeader header)
+            var name = col.SortMemberPath;
+            if (string.IsNullOrEmpty(name) && col.Header is string headerName)
             {
-                header.SetFilterActive(_columnFilters.TryGetValue(header.ColumnName, out var f) && f.IsActive);
+                name = headerName;
             }
+
+            if (string.IsNullOrEmpty(name))
+            {
+                continue;
+            }
+
+            ExcelColumnHeader.SetFilterActive(
+                col,
+                _columnFilters.TryGetValue(name, out var f) && f.IsActive);
         }
+    }
+
+    private static T? FindAncestor<T>(DependencyObject? start) where T : DependencyObject
+    {
+        while (start is not null)
+        {
+            if (start is T match)
+            {
+                return match;
+            }
+
+            start = VisualTreeHelper.GetParent(start);
+        }
+
+        return null;
     }
 
     private static void PlaceBelow(Window window, FrameworkElement target)
@@ -794,9 +1370,10 @@ public partial class MainWindow : Window
             window.Left = Math.Max(0, SystemParameters.WorkArea.Right - window.Width);
         }
 
-        if (window.Top + 440 > SystemParameters.WorkArea.Bottom)
+        var height = window.Height > 0 ? window.Height : 428;
+        if (window.Top + height > SystemParameters.WorkArea.Bottom)
         {
-            window.Top = Math.Max(0, point.Y - 440);
+            window.Top = Math.Max(0, point.Y - height - target.ActualHeight);
         }
     }
 
