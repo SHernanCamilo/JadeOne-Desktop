@@ -13,11 +13,24 @@ public partial class ExcelColumnHeader : UserControl
             typeof(ExcelColumnHeader),
             new FrameworkPropertyMetadata(false));
 
+    public static readonly DependencyProperty IsSelectedProperty =
+        DependencyProperty.RegisterAttached(
+            "IsSelected",
+            typeof(bool),
+            typeof(ExcelColumnHeader),
+            new FrameworkPropertyMetadata(false));
+
     public static void SetFilterActive(DependencyObject element, bool value) =>
         element.SetValue(FilterActiveProperty, value);
 
     public static bool GetFilterActive(DependencyObject element) =>
         (bool)element.GetValue(FilterActiveProperty);
+
+    public static void SetIsSelected(DependencyObject element, bool value) =>
+        element.SetValue(IsSelectedProperty, value);
+
+    public static bool GetIsSelected(DependencyObject element) =>
+        (bool)element.GetValue(IsSelectedProperty);
 
     public string ColumnName { get; } = "";
 

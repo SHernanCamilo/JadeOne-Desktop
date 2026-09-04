@@ -9,6 +9,10 @@ $outDir = Join-Path $root "publish"
 $storageDir = Join-Path (Split-Path -Parent $root) "api-app_crm\storage\app\desktop"
 
 Write-Host "Publicando JadeOne Desktop ($Configuration, win-x64, self-contained)..."
+if (Test-Path $outDir) {
+    Remove-Item $outDir -Recurse -Force
+}
+
 dotnet publish (Join-Path $root "SaraBI.csproj") `
     -c $Configuration `
     -r win-x64 `

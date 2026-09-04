@@ -1,11 +1,13 @@
 using System.ComponentModel;
 using System.Data;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -37,10 +39,13 @@ public partial class MainWindow : Window
     private WorkbookSheet? _activeSheet;
     private bool _didRestorePivots;
     private DispatcherTimer? _pivotSaveTimer;
+    private readonly List<ColumnOverride> _columnOverrides = new();
+    private string? _selectedColumnName;
 
     public MainWindow(string? protocolUrl)
     {
         InitializeComponent();
+        AttachColumnHeaderInteractions();
         _protocolUrl = protocolUrl;
         Loaded += OnLoaded;
         Closed += (_, _) =>
@@ -343,8 +348,11 @@ public partial class MainWindow : Window
     {
         _openFilter?.Close();
         _columnFilters.Clear();
+        _selectedColumnName = null;
         _table?.Dispose();
         _table = table;
+        ColumnMutator.StampOriginalNames(_table);
+        ApplyColumnLayout();
         _view = table.DefaultView;
         EnsureDataSheet();
         WorkbookSheet? prefer = null;
@@ -410,9 +418,7 @@ public partial class MainWindow : Window
         var colText = ColumnFilterBox.Text.Trim();
         if (!string.IsNullOrEmpty(colText) && FilterColumnCombo.SelectedItem is FabricColumn col)
         {
-            var name = _table.Columns.Cast<DataColumn>()
-                .FirstOrDefault(c => string.Equals(c.ColumnName, col.Name, StringComparison.OrdinalIgnoreCase))
-                ?.ColumnName;
+            var name = MapSourceColumn(col.Name);
             if (!string.IsNullOrEmpty(name))
             {
                 parts.Add($"CONVERT([{EscapeCol(name)}], 'System.String') LIKE '%{EscapeFilter(colText)}%'");
@@ -739,10 +745,7 @@ public partial class MainWindow : Window
             return null;
         }
 
-        string? MapColumn(string name) =>
-            _table.Columns.Cast<DataColumn>()
-                .FirstOrDefault(c => string.Equals(c.ColumnName, name, StringComparison.OrdinalIgnoreCase))
-                ?.ColumnName;
+        string? MapColumn(string name) => MapSourceColumn(name);
 
         WorkbookSheet? firstBuilt = null;
         WorkbookSheet? namedActive = null;
@@ -753,6 +756,7 @@ public partial class MainWindow : Window
                 Name = string.IsNullOrWhiteSpace(item.Name) ? "Tabla dinámica" : item.Name,
                 IsPivot = true,
             };
+            RestorePivotLayout(sheet, item);
             sheet.Config.ApplySaved(item.Config, MapColumn);
             if (_view is not null)
             {
@@ -840,6 +844,11 @@ public partial class MainWindow : Window
                 {
                     Name = s.Name,
                     Config = s.Config.ToSaved(),
+                    Captions = new Dictionary<string, string>(s.Captions, StringComparer.Ordinal),
+                    ColumnKinds = s.ColumnKinds.ToDictionary(
+                        kv => kv.Key,
+                        kv => kv.Value.ToString(),
+                        StringComparer.Ordinal),
                 }).ToList(),
             };
             PivotStateStore.Save(_session, state);
@@ -916,6 +925,7 @@ public partial class MainWindow : Window
         sheet.Result?.Dispose();
         sheet.Result = built.Table;
         sheet.Snapshot = built.Snapshot;
+        ApplyPivotColumnLayout(sheet);
     }
 
     private void OnPivotOutlineClick(object sender, MouseButtonEventArgs e)
@@ -959,6 +969,7 @@ public partial class MainWindow : Window
         var next = PivotEngine.Flatten(snapshot, _activeSheet.Config.ExpandedPaths);
         _activeSheet.Result?.Dispose();
         _activeSheet.Result = next;
+        ApplyPivotColumnLayout(_activeSheet);
         Grid.ItemsSource = next.DefaultView;
         UpdateMetrics();
     }
@@ -1006,7 +1017,7 @@ public partial class MainWindow : Window
         }
 
         e.Column.MinWidth = 88;
-        e.Column.Header = name;
+        e.Column.Header = DisplayHeader(name);
         if (string.Equals(name, PivotEngine.OutlineColumn, StringComparison.Ordinal))
         {
             e.Column.CanUserSort = false;
@@ -1016,21 +1027,37 @@ public partial class MainWindow : Window
         ExcelColumnHeader.SetFilterActive(
             e.Column,
             _columnFilters.TryGetValue(name, out var existing) && existing.IsActive);
+        ExcelColumnHeader.SetIsSelected(
+            e.Column,
+            string.Equals(name, _selectedColumnName, StringComparison.Ordinal));
         if (e.Column is DataGridTextColumn text)
         {
+            var kind = ResolveColumnKind(name);
             text.ElementStyle = new Style(typeof(TextBlock))
             {
                 Setters =
                 {
                     new Setter(TextBlock.PaddingProperty, new Thickness(4, 0, 4, 0)),
                     new Setter(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center),
+                    new Setter(TextBlock.HorizontalAlignmentProperty,
+                        kind is ColumnDataKind.Moneda or ColumnDataKind.Numero or ColumnDataKind.Entero
+                            ? HorizontalAlignment.Right
+                            : HorizontalAlignment.Left),
                 },
             };
-            if (e.PropertyType == typeof(DateTime) || DataFileParser.IsFechaColumn(name))
+            if (kind == ColumnDataKind.Fecha || e.PropertyType == typeof(DateTime))
             {
                 text.Binding = new Binding(name)
                 {
                     Converter = FechaDisplayConverter.Instance,
+                };
+            }
+            else if (kind == ColumnDataKind.Moneda)
+            {
+                text.Binding = new Binding("[" + name.Replace("]", @"\]") + "]")
+                {
+                    Converter = MonedaDisplayConverter.Instance,
+                    Mode = BindingMode.OneWay,
                 };
             }
         }
@@ -1048,11 +1075,8 @@ public partial class MainWindow : Window
         var colIndex = Grid.Columns.IndexOf(Grid.CurrentCell.Column);
         var colLetter = ColLetter(colIndex);
         var rowIndex = Grid.Items.IndexOf(Grid.CurrentItem) + 1;
-        var name = Grid.CurrentCell.Column.SortMemberPath;
-        if (string.IsNullOrEmpty(name) && Grid.CurrentCell.Column.Header is string headerName)
-        {
-            name = headerName;
-        }
+        var name = ColumnKey(Grid.CurrentCell.Column);
+        SelectGridColumn(Grid.CurrentCell.Column);
 
         CellRefText.Text = $"{colLetter}{Math.Max(rowIndex, 1)}";
         if (string.IsNullOrEmpty(name) || !row.Row.Table.Columns.Contains(name))
@@ -1062,9 +1086,12 @@ public partial class MainWindow : Window
         }
 
         var cell = row[name];
-        FormulaBox.Text = cell is DateTime dt
+        var kind = ResolveColumnKind(name);
+        FormulaBox.Text = kind == ColumnDataKind.Fecha && cell is DateTime dt
             ? DataFileParser.FormatFecha(dt)
-            : Convert.ToString(cell, CultureInfo.CurrentCulture) ?? "";
+            : kind == ColumnDataKind.Moneda
+                ? MonedaDisplayConverter.Format(cell) ?? ""
+                : Convert.ToString(cell, CultureInfo.CurrentCulture) ?? "";
     }
 
     private static string ColLetter(int index)
@@ -1100,11 +1127,7 @@ public partial class MainWindow : Window
         }
 
         var colHeader = FindAncestor<System.Windows.Controls.Primitives.DataGridColumnHeader>(fe);
-        var name = colHeader?.Column?.SortMemberPath;
-        if (string.IsNullOrEmpty(name) && colHeader?.Column?.Header is string headerName)
-        {
-            name = headerName;
-        }
+        var name = ColumnKey(colHeader?.Column);
 
         if (!string.IsNullOrEmpty(name))
         {
@@ -1142,9 +1165,10 @@ public partial class MainWindow : Window
         }
 
         _columnFilters.TryGetValue(columnName, out var current);
-        var isDate = DataFileParser.IsFechaColumn(columnName)
-                     || (_table.Columns.Contains(columnName)
-                         && _table.Columns[columnName]!.DataType == typeof(DateTime));
+        var bound = BoundTable;
+        var isDate = bound is not null
+                     && bound.Columns.Contains(columnName)
+                     && bound.Columns[columnName]!.DataType == typeof(DateTime);
         var win = new ExcelAutoFilterWindow(columnName, items, current, textOnly, isDate)
         {
             Owner = this,
@@ -1326,9 +1350,9 @@ public partial class MainWindow : Window
         foreach (var col in Grid.Columns)
         {
             var name = col.SortMemberPath;
-            if (string.IsNullOrEmpty(name) && col.Header is string headerName)
+            if (string.IsNullOrEmpty(name))
             {
-                name = headerName;
+                name = col.Header as string;
             }
 
             if (string.IsNullOrEmpty(name))
@@ -1381,4 +1405,605 @@ public partial class MainWindow : Window
         value.Replace("'", "''").Replace("[", "[[").Replace("]", "]]").Replace("%", "[%]").Replace("*", "[*]");
 
     private static string EscapeCol(string name) => name.Replace("]", "]]");
+
+    private DataTable? BoundTable => IsPivotSheet ? _activeSheet?.Result : _table;
+
+    private static string? ColumnKey(DataGridColumn? column)
+    {
+        if (column is null)
+        {
+            return null;
+        }
+
+        return string.IsNullOrEmpty(column.SortMemberPath)
+            ? column.Header as string
+            : column.SortMemberPath;
+    }
+
+    private string DisplayHeader(string name)
+    {
+        if (IsPivotSheet
+            && _activeSheet?.Captions.TryGetValue(name, out var caption) == true
+            && !string.IsNullOrWhiteSpace(caption))
+        {
+            return caption;
+        }
+
+        return name;
+    }
+
+    private ColumnDataKind ResolveColumnKind(string name)
+    {
+        var table = BoundTable;
+        if (table is not null && table.Columns.Contains(name))
+        {
+            var col = table.Columns[name]!;
+            if (ColumnMutator.TryGetKind(col, out var stamped))
+            {
+                return stamped;
+            }
+        }
+
+        if (IsPivotSheet && _activeSheet?.ColumnKinds.TryGetValue(name, out var pivotKind) == true)
+        {
+            return pivotKind;
+        }
+
+        var ov = _columnOverrides.FirstOrDefault(o =>
+            string.Equals(o.DisplayName, name, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(o.OriginalName, name, StringComparison.OrdinalIgnoreCase));
+        if (ov is not null
+            && ColumnDataKinds.TryParse(ov.Kind, out var savedKind))
+        {
+            return savedKind;
+        }
+
+        if (table is not null && table.Columns.Contains(name))
+        {
+            return ColumnDataKinds.FromType(table.Columns[name]!.DataType);
+        }
+
+        return ColumnDataKind.Texto;
+    }
+
+    private string? MapSourceColumn(string name)
+    {
+        if (_table is null || string.IsNullOrEmpty(name))
+        {
+            return null;
+        }
+
+        var ov = _columnOverrides.FirstOrDefault(o =>
+            string.Equals(o.OriginalName, name, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(o.DisplayName, name, StringComparison.OrdinalIgnoreCase));
+        var want = string.IsNullOrWhiteSpace(ov?.DisplayName) ? name : ov!.DisplayName;
+        return _table.Columns.Cast<DataColumn>().FirstOrDefault(c =>
+            string.Equals(c.ColumnName, want, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(c.ColumnName, name, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(ColumnMutator.OriginalNameOf(c), name, StringComparison.OrdinalIgnoreCase))
+            ?.ColumnName;
+    }
+
+    private static DataColumn? FindColumn(DataTable table, string name) =>
+        table.Columns.Cast<DataColumn>().FirstOrDefault(c =>
+            string.Equals(c.ColumnName, name, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(ColumnMutator.OriginalNameOf(c), name, StringComparison.OrdinalIgnoreCase));
+
+    private void ApplyColumnLayout()
+    {
+        if (_table is null)
+        {
+            return;
+        }
+
+        if (_session is not null && _columnOverrides.Count == 0)
+        {
+            var saved = ColumnLayoutStore.Load(_session);
+            if (saved?.Columns is { Count: > 0 })
+            {
+                _columnOverrides.AddRange(saved.Columns);
+            }
+        }
+
+        foreach (var ov in _columnOverrides.ToList())
+        {
+            var col = FindColumn(_table, ov.OriginalName) ?? FindColumn(_table, ov.DisplayName);
+            if (col is null)
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(ov.Kind)
+                && ColumnDataKinds.TryParse(ov.Kind, out var kind))
+            {
+                if (ColumnDataKinds.FromType(col.DataType) != kind)
+                {
+                    ColumnMutator.ChangeType(_table, col.ColumnName, kind);
+                    col = _table.Columns[col.ColumnName];
+                    if (col is null)
+                    {
+                        continue;
+                    }
+                }
+                else
+                {
+                    ColumnMutator.StampKind(col, kind);
+                }
+            }
+
+            var target = string.IsNullOrWhiteSpace(ov.DisplayName) ? ov.OriginalName : ov.DisplayName;
+            if (!string.Equals(col.ColumnName, target, StringComparison.Ordinal))
+            {
+                ColumnMutator.Rename(_table, col.ColumnName, target);
+            }
+        }
+    }
+
+    private void PersistColumnLayout()
+    {
+        if (_session is null)
+        {
+            return;
+        }
+
+        ColumnLayoutStore.Save(_session, _columnOverrides);
+    }
+
+    private static void RestorePivotLayout(WorkbookSheet sheet, SavedPivotSheet saved)
+    {
+        sheet.Captions.Clear();
+        foreach (var kv in saved.Captions ?? new Dictionary<string, string>())
+        {
+            if (!string.IsNullOrWhiteSpace(kv.Key) && !string.IsNullOrWhiteSpace(kv.Value))
+            {
+                sheet.Captions[kv.Key] = kv.Value;
+            }
+        }
+
+        sheet.ColumnKinds.Clear();
+        foreach (var kv in saved.ColumnKinds ?? new Dictionary<string, string>())
+        {
+            if (ColumnDataKinds.TryParse(kv.Value, out var kind))
+            {
+                sheet.ColumnKinds[kv.Key] = kind;
+            }
+        }
+    }
+
+    private static void ApplyPivotColumnLayout(WorkbookSheet sheet)
+    {
+        if (sheet.Result is null || sheet.ColumnKinds.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var name in sheet.Result.Columns.Cast<DataColumn>().Select(c => c.ColumnName).ToList())
+        {
+            if (PivotEngine.IsHiddenColumn(name)
+                || string.Equals(name, PivotEngine.OutlineColumn, StringComparison.Ordinal)
+                || !sheet.ColumnKinds.TryGetValue(name, out var kind))
+            {
+                continue;
+            }
+
+            var col = sheet.Result.Columns[name];
+            if (col is null)
+            {
+                continue;
+            }
+
+            if (ColumnDataKinds.FromType(col.DataType) == kind)
+            {
+                ColumnMutator.StampKind(col, kind);
+                continue;
+            }
+
+            ColumnMutator.ChangeType(sheet.Result, name, kind);
+        }
+    }
+
+    private ColumnOverride UpsertSourceOverride(DataColumn col)
+    {
+        var original = ColumnMutator.OriginalNameOf(col);
+        var existing = _columnOverrides.FirstOrDefault(o =>
+            string.Equals(o.OriginalName, original, StringComparison.OrdinalIgnoreCase));
+        if (existing is null)
+        {
+            existing = new ColumnOverride
+            {
+                OriginalName = original,
+                DisplayName = col.ColumnName,
+            };
+            _columnOverrides.Add(existing);
+        }
+
+        existing.DisplayName = col.ColumnName;
+        return existing;
+    }
+
+    private void SelectGridColumn(DataGridColumn? column)
+    {
+        _selectedColumnName = ColumnKey(column);
+        foreach (var col in Grid.Columns)
+        {
+            ExcelColumnHeader.SetIsSelected(
+                col,
+                !string.IsNullOrEmpty(_selectedColumnName)
+                && string.Equals(ColumnKey(col), _selectedColumnName, StringComparison.Ordinal));
+        }
+    }
+
+    private string? ResolveSelectedColumn()
+    {
+        if (!string.IsNullOrEmpty(_selectedColumnName)
+            && Grid.Columns.Any(c => string.Equals(ColumnKey(c), _selectedColumnName, StringComparison.Ordinal)))
+        {
+            return _selectedColumnName;
+        }
+
+        return ColumnKey(Grid.CurrentCell.Column);
+    }
+
+    private bool CanEditColumn([NotNullWhen(true)] string? name) =>
+        !string.IsNullOrEmpty(name) && !PivotEngine.IsHiddenColumn(name);
+
+    private static bool CanChangeColumnType(string name) =>
+        !PivotEngine.IsHiddenColumn(name)
+        && !string.Equals(name, PivotEngine.OutlineColumn, StringComparison.Ordinal);
+
+    private void AttachColumnHeaderInteractions()
+    {
+        Grid.AddHandler(ButtonBase.ClickEvent, new RoutedEventHandler(OnColumnHeaderClick), true);
+        Grid.AddHandler(Control.MouseDoubleClickEvent, new MouseButtonEventHandler(OnColumnHeaderDoubleClick), true);
+        Grid.AddHandler(FrameworkElement.ContextMenuOpeningEvent, new ContextMenuEventHandler(OnColumnHeaderMenuOpening), true);
+
+        var menu = CreateColumnHeaderMenu();
+        var current = Grid.ColumnHeaderStyle;
+        var style = current is { IsSealed: true }
+            ? new Style(typeof(DataGridColumnHeader), current)
+            : current ?? new Style(typeof(DataGridColumnHeader));
+        style.Setters.Add(new Setter(FrameworkElement.ContextMenuProperty, menu));
+        Grid.ColumnHeaderStyle = style;
+    }
+
+    private ContextMenu CreateColumnHeaderMenu()
+    {
+        var menu = new ContextMenu();
+        var rename = new MenuItem { Header = "Cambiar nombre...", InputGestureText = "F2" };
+        rename.Click += OnRenameColumn;
+
+        var types = new MenuItem { Header = "Tipo de dato" };
+        foreach (var (label, tag) in new (string Label, string Tag)[]
+        {
+            ("Texto", "Texto"),
+            ("Número", "Numero"),
+            ("Moneda", "Moneda"),
+            ("Entero", "Entero"),
+            ("Fecha", "Fecha"),
+            ("Verdadero/Falso", "Logico"),
+        })
+        {
+            var item = new MenuItem { Header = label, Tag = tag };
+            item.Click += OnChangeColumnType;
+            types.Items.Add(item);
+        }
+
+        var props = new MenuItem { Header = "Propiedades de columna..." };
+        props.Click += OnColumnProperties;
+
+        menu.Items.Add(rename);
+        menu.Items.Add(types);
+        menu.Items.Add(new Separator());
+        menu.Items.Add(props);
+        return menu;
+    }
+
+    private void OnColumnHeaderClick(object sender, RoutedEventArgs e)
+    {
+        var header = FindAncestor<DataGridColumnHeader>(e.OriginalSource as DependencyObject);
+        if (header?.Column is not null)
+        {
+            SelectGridColumn(header.Column);
+        }
+    }
+
+    private void OnColumnHeaderDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (e.OriginalSource is DependencyObject d
+            && FindAncestor<Button>(d) is not null)
+        {
+            return;
+        }
+
+        var header = FindAncestor<System.Windows.Controls.Primitives.DataGridColumnHeader>(
+            e.OriginalSource as DependencyObject);
+        if (header?.Column is null)
+        {
+            return;
+        }
+
+        SelectGridColumn(header.Column);
+        OpenColumnProperties();
+        e.Handled = true;
+    }
+
+    private void OnColumnHeaderMenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        var header = FindAncestor<System.Windows.Controls.Primitives.DataGridColumnHeader>(
+            e.OriginalSource as DependencyObject);
+        if (header?.Column is not null)
+        {
+            SelectGridColumn(header.Column);
+        }
+    }
+
+    private void OnGridPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.F2)
+        {
+            e.Handled = true;
+            OpenColumnProperties();
+        }
+    }
+
+    private void OnRibbonColumnType(object sender, RoutedEventArgs e)
+    {
+        if (ResolveSelectedColumn() is null)
+        {
+            PromptSelectColumn();
+            return;
+        }
+
+        if (sender is not Button { ContextMenu: { } menu } btn)
+        {
+            OpenColumnProperties();
+            return;
+        }
+
+        menu.PlacementTarget = btn;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        menu.IsOpen = true;
+    }
+
+    private void OnRenameColumn(object sender, RoutedEventArgs e) => OpenColumnProperties();
+
+    private void OnColumnProperties(object sender, RoutedEventArgs e) => OpenColumnProperties();
+
+    private void OnChangeColumnType(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: string tag }
+            || !ColumnDataKinds.TryParse(tag, out var kind))
+        {
+            return;
+        }
+
+        ApplySelectedColumnType(kind);
+    }
+
+    private void PromptSelectColumn()
+    {
+        MessageBox.Show(this,
+            "Seleccione una columna haciendo clic en su encabezado, como en Excel.",
+            "Columna", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void OpenColumnProperties()
+    {
+        var key = ResolveSelectedColumn();
+        if (!CanEditColumn(key) || BoundTable is null)
+        {
+            PromptSelectColumn();
+            return;
+        }
+
+        var table = BoundTable;
+        if (!table.Columns.Contains(key))
+        {
+            PromptSelectColumn();
+            return;
+        }
+
+        var col = table.Columns[key]!;
+        var currentName = DisplayHeader(key);
+        var currentKind = ResolveColumnKind(key);
+        var dialog = new ColumnPropertiesDialog(currentName, currentKind) { Owner = this };
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        ApplySelectedColumnRename(dialog.ColumnName);
+        if (CanChangeColumnType(key))
+        {
+            ApplySelectedColumnType(dialog.Kind);
+        }
+    }
+
+    private void ApplySelectedColumnRename(string newName)
+    {
+        var key = ResolveSelectedColumn();
+        if (!CanEditColumn(key) || BoundTable is null)
+        {
+            PromptSelectColumn();
+            return;
+        }
+
+        var table = BoundTable;
+        if (!table.Columns.Contains(key))
+        {
+            return;
+        }
+
+        var sanitized = ColumnMutator.SanitizeName(newName);
+        if (string.Equals(DisplayHeader(key), sanitized, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        Mouse.OverrideCursor = Cursors.Wait;
+        try
+        {
+            if (IsPivotSheet && _activeSheet is not null)
+            {
+                _activeSheet.Captions[key] = sanitized;
+                var gridCol = Grid.Columns.FirstOrDefault(c =>
+                    string.Equals(ColumnKey(c), key, StringComparison.Ordinal));
+                if (gridCol is not null)
+                {
+                    gridCol.Header = sanitized;
+                }
+
+                ScheduleSavePivots();
+                StatusText.Text = $"Columna renombrada a «{sanitized}».";
+                return;
+            }
+
+            Grid.ItemsSource = null;
+            var next = ColumnMutator.Rename(table, key, sanitized);
+            RemapSourceColumnName(key, next);
+            var dataCol = table.Columns[next];
+            if (dataCol is not null)
+            {
+                UpsertSourceOverride(dataCol);
+            }
+
+            PersistColumnLayout();
+            RebindGrid(next);
+            RefreshPivotFieldList();
+            StatusText.Text = $"Columna renombrada a «{next}».";
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Cambiar nombre", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+        }
+    }
+
+    private void ApplySelectedColumnType(ColumnDataKind kind)
+    {
+        var key = ResolveSelectedColumn();
+        if (string.IsNullOrEmpty(key) || BoundTable is null)
+        {
+            PromptSelectColumn();
+            return;
+        }
+
+        if (!CanChangeColumnType(key) || !BoundTable.Columns.Contains(key))
+        {
+            MessageBox.Show(this,
+                "Esta columna no admite cambio de tipo de dato.",
+                "Tipo de dato", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var table = BoundTable;
+        var col = table.Columns[key]!;
+        if (ColumnDataKinds.FromType(col.DataType) == kind
+            && (!IsPivotSheet || _activeSheet?.ColumnKinds.GetValueOrDefault(key) == kind))
+        {
+            return;
+        }
+
+        Mouse.OverrideCursor = Cursors.Wait;
+        try
+        {
+            Grid.ItemsSource = null;
+            var result = ColumnMutator.ChangeType(table, key, kind);
+            if (IsPivotSheet && _activeSheet is not null)
+            {
+                _activeSheet.ColumnKinds[key] = kind;
+                RebindGrid(key);
+                ScheduleSavePivots();
+            }
+            else
+            {
+                var dataCol = table.Columns[key];
+                if (dataCol is not null)
+                {
+                    var ov = UpsertSourceOverride(dataCol);
+                    ov.Kind = kind.ToString();
+                }
+
+                PersistColumnLayout();
+                RebuildAllPivots(bindActive: false);
+                RebindGrid(key);
+                RefreshPivotFieldList();
+            }
+
+            StatusText.Text = $"Tipo de «{DisplayHeader(key)}» → {ColumnDataKinds.Label(kind)}.";
+            if (result.Failed > 0)
+            {
+                MessageBox.Show(this,
+                    $"{result.Failed:N0} de {result.Total:N0} celdas no se pudieron convertir y quedaron en blanco.",
+                    "Tipo de dato", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error($"Cambio de tipo a {kind} en '{key}'", ex);
+            MessageBox.Show(this, ex.Message, "Tipo de dato", MessageBoxButton.OK, MessageBoxImage.Error);
+            if (BoundTable is not null)
+            {
+                RebindGrid(key);
+            }
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+        }
+    }
+
+    private void RemapSourceColumnName(string oldName, string newName)
+    {
+        if (string.Equals(oldName, newName, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (_columnFilters.Remove(oldName, out var filter))
+        {
+            _columnFilters[newName] = filter;
+        }
+
+        foreach (var sheet in _sheets.Where(s => s.IsPivot))
+        {
+            sheet.Config.RenameField(oldName, newName);
+        }
+
+        _selectedColumnName = newName;
+    }
+
+    private void RebindGrid(string? keepColumn)
+    {
+        Grid.ItemsSource = null;
+        if (IsPivotSheet)
+        {
+            Grid.ItemsSource = _activeSheet?.Result?.DefaultView;
+        }
+        else
+        {
+            Grid.ItemsSource = _view;
+        }
+        if (!string.IsNullOrEmpty(keepColumn))
+        {
+            var col = Grid.Columns.FirstOrDefault(c =>
+                string.Equals(ColumnKey(c), keepColumn, StringComparison.Ordinal));
+            SelectGridColumn(col);
+        }
+
+        UpdateMetrics();
+    }
+
+    private void RefreshPivotFieldList()
+    {
+        if (_table is null || _view is null || PivotSidebar.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        PivotSidebar.SetFields(_table.Columns.Cast<DataColumn>().Select(c => c.ColumnName), _view);
+    }
 }

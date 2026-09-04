@@ -15,6 +15,8 @@ public sealed class SavedPivotSheet
 {
     public string Name { get; set; } = "";
     public SavedPivotConfig Config { get; set; } = new();
+    public Dictionary<string, string> Captions { get; set; } = new(StringComparer.Ordinal);
+    public Dictionary<string, string> ColumnKinds { get; set; } = new(StringComparer.Ordinal);
 }
 
 public sealed class SavedPivotConfig

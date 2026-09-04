@@ -41,6 +41,52 @@ public sealed class PivotConfig
 
     public bool CanBuild => Rows.Count > 0 || Columns.Count > 0 || Values.Count > 0;
 
+    public void RenameField(string oldName, string newName)
+    {
+        if (string.IsNullOrEmpty(oldName)
+            || string.Equals(oldName, newName, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        for (var i = 0; i < Rows.Count; i++)
+        {
+            if (string.Equals(Rows[i].Column, oldName, StringComparison.OrdinalIgnoreCase))
+            {
+                Rows[i] = new PivotAxisField(newName, Rows[i].Group);
+            }
+        }
+
+        for (var i = 0; i < Columns.Count; i++)
+        {
+            if (string.Equals(Columns[i].Column, oldName, StringComparison.OrdinalIgnoreCase))
+            {
+                Columns[i] = new PivotAxisField(newName, Columns[i].Group);
+            }
+        }
+
+        foreach (var value in Values)
+        {
+            if (string.Equals(value.Column, oldName, StringComparison.OrdinalIgnoreCase))
+            {
+                value.Column = newName;
+            }
+        }
+
+        for (var i = 0; i < Filters.Count; i++)
+        {
+            if (string.Equals(Filters[i], oldName, StringComparison.OrdinalIgnoreCase))
+            {
+                Filters[i] = newName;
+            }
+        }
+
+        if (FilterSelections.Remove(oldName, out var selected))
+        {
+            FilterSelections[newName] = selected;
+        }
+    }
+
     public void Clear()
     {
         Rows.Clear();

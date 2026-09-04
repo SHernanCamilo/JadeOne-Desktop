@@ -10,4 +10,6 @@ public sealed class WorkbookSheet
     public PivotConfig Config { get; } = new();
     public DataTable? Result { get; set; }
     public PivotSnapshot? Snapshot { get; set; }
+    public Dictionary<string, string> Captions { get; } = new(StringComparer.Ordinal);
+    public Dictionary<string, ColumnDataKind> ColumnKinds { get; } = new(StringComparer.Ordinal);
 }

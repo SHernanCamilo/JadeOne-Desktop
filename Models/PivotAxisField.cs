@@ -61,10 +61,9 @@ public static class DateGroup
             return false;
         }
 
-        if (table?.Columns.Contains(column) == true
-            && table.Columns[column]!.DataType == typeof(DateTime))
+        if (table?.Columns.Contains(column) == true)
         {
-            return true;
+            return table.Columns[column]!.DataType == typeof(DateTime);
         }
 
         return DataFileParser.IsFechaColumn(column);

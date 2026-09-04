@@ -147,6 +147,38 @@
             </Button>
             <TextBlock Text="Análisis" FontSize="10.5" Foreground="#757575" HorizontalAlignment="Center"/>
           </StackPanel>
+          <Border Width="1" Background="#E0E0E0" Margin="0,8"/>
+          <StackPanel Margin="8,4,8,2">
+            <StackPanel Orientation="Horizontal">
+              <Button Style="{StaticResource XlRibbonBtn}" Click="OnRenameColumn"
+                      ToolTip="Cambiar el nombre de la columna seleccionada (F2)">
+                <StackPanel>
+                  <TextBlock Text="A" FontSize="16" FontWeight="SemiBold" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Nombre&#x0a;columna" TextAlignment="Center"/>
+                </StackPanel>
+              </Button>
+              <Button Style="{StaticResource XlRibbonBtn}" Click="OnRibbonColumnType"
+                      ToolTip="Cambiar el tipo de dato de la columna seleccionada">
+                <Button.ContextMenu>
+                  <ContextMenu>
+                    <MenuItem Header="Texto" Tag="Texto" Click="OnChangeColumnType"/>
+                    <MenuItem Header="Número" Tag="Numero" Click="OnChangeColumnType"/>
+                    <MenuItem Header="Moneda" Tag="Moneda" Click="OnChangeColumnType"/>
+                    <MenuItem Header="Entero" Tag="Entero" Click="OnChangeColumnType"/>
+                    <MenuItem Header="Fecha" Tag="Fecha" Click="OnChangeColumnType"/>
+                    <MenuItem Header="Verdadero/Falso" Tag="Logico" Click="OnChangeColumnType"/>
+                    <Separator/>
+                    <MenuItem Header="Más opciones..." Click="OnColumnProperties"/>
+                  </ContextMenu>
+                </Button.ContextMenu>
+                <StackPanel>
+                  <TextBlock Text="123" FontSize="13" FontWeight="SemiBold" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Tipo de&#x0a;dato" TextAlignment="Center"/>
+                </StackPanel>
+              </Button>
+            </StackPanel>
+            <TextBlock Text="Columna" FontSize="10.5" Foreground="#757575" HorizontalAlignment="Center"/>
+          </StackPanel>
         </StackPanel>
 
         <StackPanel x:Name="RibbonFiltros" Orientation="Horizontal" Visibility="Collapsed" Margin="10,10,10,6">
@@ -198,6 +230,38 @@
               </Button>
             </StackPanel>
             <TextBlock Text="Este equipo" FontSize="10.5" Foreground="#757575" HorizontalAlignment="Center"/>
+          </StackPanel>
+          <Border Width="1" Background="#E0E0E0" Margin="0,8"/>
+          <StackPanel Margin="8,4,8,2">
+            <StackPanel Orientation="Horizontal">
+              <Button Style="{StaticResource XlRibbonBtn}" Click="OnRenameColumn"
+                      ToolTip="Cambiar el nombre de la columna seleccionada (F2)">
+                <StackPanel>
+                  <TextBlock Text="A" FontSize="16" FontWeight="SemiBold" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Nombre&#x0a;columna" TextAlignment="Center"/>
+                </StackPanel>
+              </Button>
+              <Button Style="{StaticResource XlRibbonBtn}" Click="OnRibbonColumnType"
+                      ToolTip="Cambiar el tipo de dato de la columna seleccionada">
+                <Button.ContextMenu>
+                  <ContextMenu>
+                    <MenuItem Header="Texto" Tag="Texto" Click="OnChangeColumnType"/>
+                    <MenuItem Header="Número" Tag="Numero" Click="OnChangeColumnType"/>
+                    <MenuItem Header="Moneda" Tag="Moneda" Click="OnChangeColumnType"/>
+                    <MenuItem Header="Entero" Tag="Entero" Click="OnChangeColumnType"/>
+                    <MenuItem Header="Fecha" Tag="Fecha" Click="OnChangeColumnType"/>
+                    <MenuItem Header="Verdadero/Falso" Tag="Logico" Click="OnChangeColumnType"/>
+                    <Separator/>
+                    <MenuItem Header="Más opciones..." Click="OnColumnProperties"/>
+                  </ContextMenu>
+                </Button.ContextMenu>
+                <StackPanel>
+                  <TextBlock Text="123" FontSize="13" FontWeight="SemiBold" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Tipo de&#x0a;dato" TextAlignment="Center"/>
+                </StackPanel>
+              </Button>
+            </StackPanel>
+            <TextBlock Text="Columna" FontSize="10.5" Foreground="#757575" HorizontalAlignment="Center"/>
           </StackPanel>
         </StackPanel>
       </Grid>
@@ -357,7 +421,8 @@
                 LoadingRow="OnLoadingRow"
                 CurrentCellChanged="OnCurrentCellChanged"
                 AutoGeneratingColumn="OnAutoGeneratingColumn"
-                PreviewMouseLeftButtonUp="OnPivotOutlineClick">
+                PreviewMouseLeftButtonUp="OnPivotOutlineClick"
+                PreviewKeyDown="OnGridPreviewKeyDown">
         <DataGrid.ColumnHeaderStyle>
           <Style TargetType="primitives:DataGridColumnHeader">
             <Setter Property="Background" Value="#E2EFDA"/>
@@ -370,6 +435,13 @@
             <Setter Property="Padding" Value="4,0,2,0"/>
             <Setter Property="Height" Value="28"/>
             <Setter Property="ContentTemplate" Value="{StaticResource ExcelColHeaderTemplate}"/>
+            <Style.Triggers>
+              <DataTrigger Binding="{Binding Column.(controls:ExcelColumnHeader.IsSelected), RelativeSource={RelativeSource Self}}" Value="True">
+                <Setter Property="Background" Value="#9DC3E6"/>
+                <Setter Property="BorderBrush" Value="#2E75B6"/>
+                <Setter Property="BorderThickness" Value="0,0,1,2"/>
+              </DataTrigger>
+            </Style.Triggers>
           </Style>
         </DataGrid.ColumnHeaderStyle>
         <DataGrid.RowHeaderStyle>
