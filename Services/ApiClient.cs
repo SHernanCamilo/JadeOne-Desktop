@@ -69,9 +69,67 @@ public sealed class ApiClient : IDisposable
         return session;
     }
 
-    public async Task<List<FabricColumn>> GetColumnsAsync(CancellationToken ct)
+    public async Task<List<VistaCatalogItem>> GetViewsAsync(CancellationToken ct)
     {
-        var payload = new { schema_name = Schema, view_name = View };
+        var parsed = await PostJsonAsync<ViewsResponse>("/fabric/viewer/views", new { }, ct)
+                     .ConfigureAwait(false);
+        if (parsed is null || !parsed.Success)
+        {
+            throw new InvalidOperationException(parsed?.Message ?? "No se pudieron listar las vistas.");
+        }
+
+        var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var s in parsed.Esquemas ?? parsed.Data?.SchemasAllowed ?? new List<string>())
+        {
+            allowed.Add(s);
+        }
+
+        var names = (parsed.EsquemasCatalogo ?? new List<EsquemaCatalogoItem>())
+            .Where(e => !string.IsNullOrWhiteSpace(e.Schema))
+            .ToDictionary(e => e.Schema, e => e.Nombre, StringComparer.OrdinalIgnoreCase);
+
+        var list = new List<VistaCatalogItem>();
+        foreach (var block in parsed.Data?.Schemas ?? new List<SchemaBlock>())
+        {
+            if (allowed.Count > 0 && !allowed.Contains(block.Schema))
+            {
+                continue;
+            }
+
+            var display = names.TryGetValue(block.Schema, out var nombre) && !string.IsNullOrWhiteSpace(nombre)
+                ? nombre
+                : block.Display;
+            foreach (var view in block.Views ?? new List<ViewBlock>())
+            {
+                if (string.IsNullOrWhiteSpace(view.ViewName))
+                {
+                    continue;
+                }
+
+                list.Add(new VistaCatalogItem
+                {
+                    Schema = block.Schema,
+                    SchemaDisplay = display,
+                    ViewName = view.ViewName,
+                    ColumnCount = view.ColumnCount,
+                    Enabled = view.VisibleForSite
+                              && !string.Equals(view.BiEstado, "mantenimiento", StringComparison.OrdinalIgnoreCase),
+                });
+            }
+        }
+
+        return list
+            .OrderBy(v => v.SchemaDisplay, StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(v => v.ViewName, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+    }
+
+    public Task<List<FabricColumn>> GetColumnsAsync(CancellationToken ct) =>
+        GetColumnsAsync(Schema, View, ct);
+
+    public async Task<List<FabricColumn>> GetColumnsAsync(string schema, string view, CancellationToken ct)
+    {
+        var payload = new { schema_name = schema, view_name = view };
         var parsed = await PostJsonAsync<ColumnsResponse>("/fabric/viewer/columns", payload, ct)
                      .ConfigureAwait(false);
         if (parsed is null || !parsed.Success)
@@ -82,7 +140,15 @@ public sealed class ApiClient : IDisposable
         return parsed.Data?.Columns ?? new List<FabricColumn>();
     }
 
+    public Task<ExportStartResponse> StartExportAsync(
+        int maxRows,
+        DateRangeFilter? dateFilter,
+        CancellationToken ct) =>
+        StartExportAsync(Schema, View, maxRows, dateFilter, ct);
+
     public async Task<ExportStartResponse> StartExportAsync(
+        string schema,
+        string view,
         int maxRows,
         DateRangeFilter? dateFilter,
         CancellationToken ct)
@@ -100,8 +166,8 @@ public sealed class ApiClient : IDisposable
 
         var payload = new Dictionary<string, object?>
         {
-            ["schema_name"] = Schema,
-            ["view"] = View,
+            ["schema_name"] = schema,
+            ["view"] = view,
             ["format"] = "gzip",
             ["max_rows"] = maxRows,
             ["filters"] = filters,
@@ -112,9 +178,12 @@ public sealed class ApiClient : IDisposable
                ?? throw new InvalidOperationException("Respuesta de export vacía.");
     }
 
-    public async Task<R2StatusResponse> GetR2StatusAsync(CancellationToken ct)
+    public Task<R2StatusResponse> GetR2StatusAsync(CancellationToken ct) =>
+        GetR2StatusAsync(Schema, View, ct);
+
+    public async Task<R2StatusResponse> GetR2StatusAsync(string schema, string view, CancellationToken ct)
     {
-        var url = $"{ApiUrl}/fabric/viewer/r2/status?schema={Uri.EscapeDataString(Schema)}&view={Uri.EscapeDataString(View)}";
+        var url = $"{ApiUrl}/fabric/viewer/r2/status?schema={Uri.EscapeDataString(schema)}&view={Uri.EscapeDataString(view)}";
         using var response = await _http.GetAsync(url, ct).ConfigureAwait(false);
         var json = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
         return JsonSerializer.Deserialize<R2StatusResponse>(json, JsonOptions)
@@ -139,6 +208,20 @@ public sealed class ApiClient : IDisposable
     {
         var url = $"{ApiUrl}/fabric/viewer/export/download/{Uri.EscapeDataString(jobId)}"
                   + "?token=" + Uri.EscapeDataString(Token);
+        return await OpenDownloadAsync(url, ct).ConfigureAwait(false);
+    }
+
+    public async Task DownloadExcelFileAsync(string jobId, string path, CancellationToken ct)
+    {
+        var url = $"{ApiUrl}/fabric/viewer/export/download/{Uri.EscapeDataString(jobId)}"
+                  + "?as=file&token=" + Uri.EscapeDataString(Token);
+        await using var stream = await OpenDownloadAsync(url, ct).ConfigureAwait(false);
+        await using var file = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 64 * 1024, useAsync: true);
+        await stream.CopyToAsync(file, ct).ConfigureAwait(false);
+    }
+
+    private async Task<Stream> OpenDownloadAsync(string url, CancellationToken ct)
+    {
         var response = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct)
             .ConfigureAwait(false);
         try

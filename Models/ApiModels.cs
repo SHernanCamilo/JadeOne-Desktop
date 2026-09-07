@@ -89,3 +89,65 @@ public sealed class R2StatusResponse
     [JsonPropertyName("row_count")]
     public long? RowCount { get; set; }
 }
+
+public sealed class ViewsResponse
+{
+    public bool Success { get; set; }
+    public string? Message { get; set; }
+    public ViewsPayload? Data { get; set; }
+
+    [JsonPropertyName("esquemas")]
+    public List<string>? Esquemas { get; set; }
+
+    [JsonPropertyName("esquemas_catalogo")]
+    public List<EsquemaCatalogoItem>? EsquemasCatalogo { get; set; }
+}
+
+public sealed class ViewsPayload
+{
+    [JsonPropertyName("schemas_allowed")]
+    public List<string>? SchemasAllowed { get; set; }
+
+    public List<SchemaBlock>? Schemas { get; set; }
+}
+
+public sealed class SchemaBlock
+{
+    public string Schema { get; set; } = "";
+    public string Display { get; set; } = "";
+    public List<ViewBlock>? Views { get; set; }
+}
+
+public sealed class ViewBlock
+{
+    [JsonPropertyName("view_name")]
+    public string ViewName { get; set; } = "";
+
+    [JsonPropertyName("qualified_name")]
+    public string? QualifiedName { get; set; }
+
+    [JsonPropertyName("column_count")]
+    public int ColumnCount { get; set; }
+
+    [JsonPropertyName("visible_for_site")]
+    public bool VisibleForSite { get; set; } = true;
+
+    [JsonPropertyName("bi_estado")]
+    public string? BiEstado { get; set; }
+}
+
+public sealed class EsquemaCatalogoItem
+{
+    public string Schema { get; set; } = "";
+    public string Nombre { get; set; } = "";
+}
+
+public sealed class VistaCatalogItem
+{
+    public string Schema { get; set; } = "";
+    public string SchemaDisplay { get; set; } = "";
+    public string ViewName { get; set; } = "";
+    public int ColumnCount { get; set; }
+    public bool Enabled { get; set; } = true;
+    public string Key => $"{Schema}.{ViewName}".ToLowerInvariant();
+}

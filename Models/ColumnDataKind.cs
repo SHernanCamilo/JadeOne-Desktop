@@ -10,6 +10,7 @@ public enum ColumnDataKind
     Entero,
     Fecha,
     Logico,
+    Porcentaje,
 }
 
 public sealed class ColumnOverride
@@ -36,6 +37,7 @@ public static class ColumnDataKinds
         ColumnDataKind.Entero => "Entero",
         ColumnDataKind.Fecha => "Fecha",
         ColumnDataKind.Logico => "Verdadero/Falso",
+        ColumnDataKind.Porcentaje => "Porcentaje",
         _ => "Texto",
     };
 
@@ -46,6 +48,7 @@ public static class ColumnDataKinds
         ColumnDataKind.Entero => typeof(long),
         ColumnDataKind.Fecha => typeof(DateTime),
         ColumnDataKind.Logico => typeof(bool),
+        ColumnDataKind.Porcentaje => typeof(double),
         _ => typeof(string),
     };
 

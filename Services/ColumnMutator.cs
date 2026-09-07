@@ -218,6 +218,7 @@ public static class ColumnMutator
                 return true;
 
             case ColumnDataKind.Numero:
+            case ColumnDataKind.Porcentaje:
                 if (TryNumber(raw, out var n))
                 {
                     value = n;

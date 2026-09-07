@@ -25,6 +25,7 @@ public partial class ColumnPropertiesDialog : Window
             new KindItem { Kind = ColumnDataKind.Moneda, Label = "Moneda" },
             new KindItem { Kind = ColumnDataKind.Entero, Label = "Entero" },
             new KindItem { Kind = ColumnDataKind.Fecha, Label = "Fecha" },
+            new KindItem { Kind = ColumnDataKind.Porcentaje, Label = "Porcentaje" },
             new KindItem { Kind = ColumnDataKind.Logico, Label = "Verdadero/Falso" },
         };
         KindCombo.ItemsSource = items;

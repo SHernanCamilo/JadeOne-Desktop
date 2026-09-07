@@ -18,9 +18,9 @@ public static class ColumnLayoutStore
         "JadeOneDesktop",
         "columns");
 
-    public static ColumnLayoutState? Load(LaunchSession session)
+    public static ColumnLayoutState? Load(LaunchSession session, string? schema = null, string? view = null)
     {
-        var path = PathFor(session);
+        var path = PathFor(session, schema, view);
         if (!File.Exists(path))
         {
             return null;
@@ -39,7 +39,11 @@ public static class ColumnLayoutStore
         }
     }
 
-    public static void Save(LaunchSession session, IReadOnlyList<ColumnOverride> columns)
+    public static void Save(
+        LaunchSession session,
+        IReadOnlyList<ColumnOverride> columns,
+        string? schema = null,
+        string? view = null)
     {
         var meaningful = columns
             .Where(c => !string.IsNullOrWhiteSpace(c.OriginalName)
@@ -48,11 +52,11 @@ public static class ColumnLayoutStore
             .ToList();
         if (meaningful.Count == 0)
         {
-            Delete(session);
+            Delete(session, schema, view);
             return;
         }
 
-        var path = PathFor(session);
+        var path = PathFor(session, schema, view);
         var dir = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(dir))
         {
@@ -61,8 +65,8 @@ public static class ColumnLayoutStore
 
         var state = new ColumnLayoutState
         {
-            Schema = session.Schema,
-            View = session.View,
+            Schema = schema ?? session.Schema,
+            View = view ?? session.View,
             SavedAt = DateTime.Now,
             Columns = meaningful,
         };
@@ -73,9 +77,9 @@ public static class ColumnLayoutStore
         File.Delete(tmp);
     }
 
-    public static void Delete(LaunchSession session)
+    public static void Delete(LaunchSession session, string? schema = null, string? view = null)
     {
-        var path = PathFor(session);
+        var path = PathFor(session, schema, view);
         if (!File.Exists(path))
         {
             return;
@@ -91,10 +95,10 @@ public static class ColumnLayoutStore
         }
     }
 
-    public static string PathFor(LaunchSession session)
+    public static string PathFor(LaunchSession session, string? schema = null, string? view = null)
     {
         var user = Sanitize(string.IsNullOrWhiteSpace(session.User) ? "_shared" : session.User!);
-        var file = $"{Sanitize(session.Schema)}.{Sanitize(session.View)}.json";
+        var file = $"{Sanitize(schema ?? session.Schema)}.{Sanitize(view ?? session.View)}.json";
         return Path.Combine(RootDir, user, file);
     }
 

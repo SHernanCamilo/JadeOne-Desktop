@@ -5,6 +5,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO;
 using System.Text;
+using Microsoft.Win32;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -23,6 +24,7 @@ namespace SaraBI;
 public partial class MainWindow : Window
 {
     private const int MaxExportRows = 3_000_000;
+    private const int MaxLoadedViews = 8;
     private readonly ApiClient _api = new();
     private readonly string? _protocolUrl;
     private DataTable? _table;
@@ -41,6 +43,8 @@ public partial class MainWindow : Window
     private DispatcherTimer? _pivotSaveTimer;
     private readonly List<ColumnOverride> _columnOverrides = new();
     private string? _selectedColumnName;
+    private bool _showTotals;
+    private List<VistaCatalogItem>? _viewsCache;
 
     public MainWindow(string? protocolUrl)
     {
@@ -57,6 +61,7 @@ public partial class MainWindow : Window
             foreach (var sheet in _sheets)
             {
                 sheet.Result?.Dispose();
+                sheet.SourceTable?.Dispose();
             }
 
             _api.Dispose();
@@ -135,11 +140,24 @@ public partial class MainWindow : Window
             return;
         }
 
-        await LoadDataAsync();
+        var target = _activeSheet is { IsPivot: false }
+            ? _activeSheet
+            : _activeSheet?.PivotSource ?? EnsureDataSheet();
+        await LoadDataAsync(target);
     }
 
-    private async Task LoadDataAsync()
+    private async Task LoadDataAsync(WorkbookSheet? into = null)
     {
+        if (_session is null)
+        {
+            return;
+        }
+
+        var sheet = into ?? EnsureDataSheet();
+        var schema = sheet.Schema ?? _session.Schema;
+        var view = sheet.ViewName ?? _session.View;
+        var dateFilter = sheet.DateFilter;
+
         _loadCts?.Cancel();
         _loadCts = new CancellationTokenSource();
         var ct = _loadCts.Token;
@@ -149,8 +167,8 @@ public partial class MainWindow : Window
 
         try
         {
-            ShowOverlay("Preparando columnas...", "Consultando metadatos de la vista", true);
-            _columns = await _api.GetColumnsAsync(ct);
+            ShowOverlay("Preparando columnas...", $"Consultando metadatos de {view}", true);
+            _columns = await _api.GetColumnsAsync(schema, view, ct);
             FilterColumnCombo.ItemsSource = _columns;
             if (_columns.Count > 0 && FilterColumnCombo.SelectedIndex < 0)
             {
@@ -158,7 +176,7 @@ public partial class MainWindow : Window
             }
 
             ShowOverlay("Exportando datos...", "Solicitando gzip a Fabric", true);
-            var start = await _api.StartExportAsync(MaxExportRows, _dateFilter, ct);
+            var start = await _api.StartExportAsync(schema, view, MaxExportRows, dateFilter, ct);
 
             if (string.Equals(start.R2Status, "too_big", StringComparison.OrdinalIgnoreCase))
             {
@@ -171,13 +189,15 @@ public partial class MainWindow : Window
                     return;
                 }
 
+                dateFilter = _dateFilter;
+                sheet.DateFilter = dateFilter;
                 ShowOverlay("Exportando con filtro...", "Aplicando rango de fechas", true);
-                start = await _api.StartExportAsync(MaxExportRows, _dateFilter, ct);
+                start = await _api.StartExportAsync(schema, view, MaxExportRows, dateFilter, ct);
             }
 
             if (string.Equals(start.R2Status, "generating", StringComparison.OrdinalIgnoreCase))
             {
-                start = await WaitForR2ThenExportAsync(start, ct);
+                start = await WaitForR2ThenExportAsync(schema, view, start, dateFilter, ct);
             }
 
             if (string.Equals(start.R2Status, "too_big", StringComparison.OrdinalIgnoreCase))
@@ -191,7 +211,9 @@ public partial class MainWindow : Window
                     return;
                 }
 
-                start = await _api.StartExportAsync(MaxExportRows, _dateFilter, ct);
+                dateFilter = _dateFilter;
+                sheet.DateFilter = dateFilter;
+                start = await _api.StartExportAsync(schema, view, MaxExportRows, dateFilter, ct);
             }
 
             if (string.IsNullOrWhiteSpace(start.JobId))
@@ -200,6 +222,7 @@ public partial class MainWindow : Window
             }
 
             var jobId = start.JobId;
+            sheet.LastJobId = jobId;
             ShowOverlay("Procesando...", start.Message ?? "Fabric está exportando los datos", true);
             var completed = await WaitForJobAsync(jobId, ct);
             var rowsHint = completed?.Rows ?? start.Rows ?? 0;
@@ -222,7 +245,7 @@ public partial class MainWindow : Window
                     _columns.Select(c => c.Name).ToList(),
                     rowsHint > int.MaxValue ? int.MaxValue : (int)rowsHint),
                 ct);
-            BindTable(table);
+            BindTable(table, sheet, restorePivots: !sheet.IsExtraView);
             GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
             HideOverlay();
             EmptyState.Visibility = Visibility.Collapsed;
@@ -232,7 +255,7 @@ public partial class MainWindow : Window
             UpdateMetrics();
             StatusText.Text = $"{table.Rows.Count:N0} registros cargados";
             HintText.Text = $"{_elapsed.Elapsed.TotalSeconds:0} seg. carga";
-            AppLog.Info($"Carga OK rows={table.Rows.Count} elapsed={_elapsed.Elapsed.TotalSeconds:0.0}s");
+            AppLog.Info($"Carga OK view={schema}.{view} rows={table.Rows.Count} elapsed={_elapsed.Elapsed.TotalSeconds:0.0}s");
         }
         catch (OperationCanceledException)
         {
@@ -254,22 +277,27 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task<ExportStartResponse> WaitForR2ThenExportAsync(ExportStartResponse start, CancellationToken ct)
+    private async Task<ExportStartResponse> WaitForR2ThenExportAsync(
+        string schema,
+        string view,
+        ExportStartResponse start,
+        DateRangeFilter? dateFilter,
+        CancellationToken ct)
     {
         var estimated = start.EstimatedS ?? 60;
         OverlayTitle.Text = "Preparando datos...";
         OverlayMessage.Text = $"Generando archivo de la vista (~{estimated}s). Puede tardar en la primera carga.";
-        AppLog.Info($"R2 generating { _session?.Schema}.{_session?.View} estimated={estimated}s");
+        AppLog.Info($"R2 generating {schema}.{view} estimated={estimated}s");
         while (!ct.IsCancellationRequested)
         {
             await Task.Delay(5000, ct);
-            var status = await _api.GetR2StatusAsync(ct);
+            var status = await _api.GetR2StatusAsync(schema, view, ct);
             var r2 = status.R2Status ?? "";
             AppLog.Info($"R2 poll status={r2} msg={status.Message}");
             if (r2 is "ready" or "ready_stale")
             {
                 OverlayMessage.Text = "Datos listos, descargando...";
-                return await _api.StartExportAsync(MaxExportRows, _dateFilter, ct);
+                return await _api.StartExportAsync(schema, view, MaxExportRows, dateFilter, ct);
             }
 
             if (r2 == "too_big")
@@ -286,7 +314,7 @@ public partial class MainWindow : Window
             if (r2 == "unavailable")
             {
                 AppLog.Warn("R2 unavailable, fallback a stream");
-                return await _api.StartExportAsync(MaxExportRows, _dateFilter, ct);
+                return await _api.StartExportAsync(schema, view, MaxExportRows, dateFilter, ct);
             }
 
             OverlayMessage.Text = $"Generando archivo de la vista (~{status.EstimatedS ?? estimated}s). Espere, no cierre la ventana.";
@@ -344,48 +372,70 @@ public partial class MainWindow : Window
 
     private bool IsPivotSheet => _activeSheet?.IsPivot == true;
 
-    private void BindTable(DataTable table)
+    private void BindTable(DataTable table, WorkbookSheet sheet, bool restorePivots)
     {
         _openFilter?.Close();
         _columnFilters.Clear();
         _selectedColumnName = null;
-        _table?.Dispose();
+
+        var old = sheet.SourceTable;
+        sheet.SourceTable = table;
+        sheet.Columns.Clear();
+        sheet.Columns.AddRange(_columns);
+
         _table = table;
         ColumnMutator.StampOriginalNames(_table);
+        LoadOverridesFor(sheet);
         ApplyColumnLayout();
         _view = table.DefaultView;
-        EnsureDataSheet();
+        sheet.Filters.Clear();
+        sheet.Overrides.Clear();
+        sheet.Overrides.AddRange(_columnOverrides);
+
+        if (old is not null
+            && !ReferenceEquals(old, table)
+            && !_sheets.Any(s => ReferenceEquals(s.SourceTable, old)))
+        {
+            old.Dispose();
+        }
+
         WorkbookSheet? prefer = null;
-        if (!_didRestorePivots)
+        if (restorePivots && !_didRestorePivots)
         {
             prefer = TryRestorePivots();
             _didRestorePivots = true;
         }
-        else if (_activeSheet is not null && _sheets.Contains(_activeSheet))
+        else
         {
-            prefer = _activeSheet;
+            prefer = sheet;
         }
 
         RebuildAllPivots(bindActive: false);
-        ActivateSheet(prefer ?? _sheets.First(s => !s.IsPivot));
+        ActivateSheet(prefer ?? sheet, capture: false);
     }
 
-    private void EnsureDataSheet()
+    private WorkbookSheet EnsureDataSheet()
     {
-        var data = _sheets.FirstOrDefault(s => !s.IsPivot);
+        var data = _sheets.FirstOrDefault(s => !s.IsPivot && !s.IsExtraView);
         if (data is null)
         {
             data = new WorkbookSheet
             {
                 Name = string.IsNullOrWhiteSpace(_session?.ViewLabel) ? "Datos" : _session!.ViewLabel,
                 IsPivot = false,
+                Schema = _session?.Schema,
+                ViewName = _session?.View,
             };
             _sheets.Insert(0, data);
         }
         else if (!string.IsNullOrWhiteSpace(_session?.ViewLabel))
         {
             data.Name = _session.ViewLabel;
+            data.Schema ??= _session?.Schema;
+            data.ViewName ??= _session?.View;
         }
+
+        return data;
     }
 
     private void OnSearchChanged(object sender, TextChangedEventArgs e)
@@ -438,7 +488,7 @@ public partial class MainWindow : Window
         {
             _view.RowFilter = string.Join(" AND ", parts);
             UpdateMetrics();
-            RebuildAllPivots();
+            RebuildPivotsUsing(_table);
         }
         catch
         {
@@ -471,8 +521,10 @@ public partial class MainWindow : Window
         }
         else if (_sheets.Count > 1)
         {
-            HintText.Text = $"{_sheets.Count} hojas";
+            HintText.Text = $"{_sheets.Count} hojas · {_sheets.Count(s => !s.IsPivot)} vistas";
         }
+
+        RefreshTotals();
     }
 
     private void ShowOverlay(string title, string message, bool indeterminate)
@@ -506,6 +558,10 @@ public partial class MainWindow : Window
 
         RibbonDatos.Visibility = TabDatos.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         RibbonFiltros.Visibility = TabFiltros.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        if (RibbonVista is not null)
+        {
+            RibbonVista.Visibility = TabVista.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        }
         RibbonAnalisis.Visibility = TabAnalisis.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -530,11 +586,15 @@ public partial class MainWindow : Window
         }
 
         EnsureDataSheet();
+        var source = _activeSheet is { IsPivot: false } data
+            ? data
+            : _activeSheet?.PivotSource ?? _sheets.FirstOrDefault(s => !s.IsPivot);
         var n = _sheets.Count(s => s.IsPivot) + 1;
         var sheet = new WorkbookSheet
         {
             Name = n == 1 ? "Tabla dinámica1" : $"Tabla dinámica{n}",
             IsPivot = true,
+            PivotSource = source,
         };
         _sheets.Add(sheet);
         ActivateSheet(sheet);
@@ -554,13 +614,33 @@ public partial class MainWindow : Window
     private void OnCloseSheetTab(object sender, RoutedEventArgs e)
     {
         e.Handled = true;
-        if (sender is not FrameworkElement { Tag: WorkbookSheet sheet } || !sheet.IsPivot)
+        if (sender is not FrameworkElement { Tag: WorkbookSheet sheet } || !sheet.CanClose)
         {
             return;
         }
 
         var index = _sheets.IndexOf(sheet);
         sheet.Result?.Dispose();
+        if (sheet.IsExtraView
+            && sheet.SourceTable is not null
+            && !_sheets.Any(s => !ReferenceEquals(s, sheet) && ReferenceEquals(s.SourceTable, sheet.SourceTable)))
+        {
+            if (ReferenceEquals(_table, sheet.SourceTable))
+            {
+                _table = null;
+                _view = null;
+            }
+
+            sheet.SourceTable.Dispose();
+            sheet.SourceTable = null;
+        }
+
+        foreach (var pivot in _sheets.Where(s => s.IsPivot && ReferenceEquals(s.PivotSource, sheet)).ToList())
+        {
+            pivot.Result?.Dispose();
+            _sheets.Remove(pivot);
+        }
+
         _sheets.Remove(sheet);
         var next = _activeSheet == sheet
             ? (index > 0 ? _sheets[index - 1] : _sheets[0])
@@ -577,8 +657,12 @@ public partial class MainWindow : Window
         ScheduleSavePivots();
     }
 
-    private void ActivateSheet(WorkbookSheet sheet)
+    private void ActivateSheet(WorkbookSheet sheet, bool capture = true)
     {
+        if (capture)
+        {
+            CaptureActiveDataState();
+        }
         foreach (var s in _sheets)
         {
             s.IsActive = ReferenceEquals(s, sheet);
@@ -590,12 +674,16 @@ public partial class MainWindow : Window
 
         if (sheet.IsPivot)
         {
-            if (_table is not null && _view is not null)
+            var sourceView = ResolvePivotSource(sheet);
+            var sourceTable = sourceView?.Table;
+            if (sourceTable is not null && sourceView is not null)
             {
                 PivotSidebar.AttachConfig(sheet.Config);
-                PivotSidebar.SetFields(_table.Columns.Cast<DataColumn>().Select(c => c.ColumnName), _view);
+                PivotSidebar.SetFields(sourceTable.Columns.Cast<DataColumn>().Select(c => c.ColumnName), sourceView);
             }
 
+            AddViewSidebar.Visibility = Visibility.Collapsed;
+            ColumnSidebar.Visibility = Visibility.Collapsed;
             PivotSidebar.Visibility = Visibility.Visible;
             Grid.ItemsSource = sheet.Result?.DefaultView;
             TabAnalisis.IsChecked = true;
@@ -605,6 +693,7 @@ public partial class MainWindow : Window
         }
         else
         {
+            RestoreDataState(sheet);
             PivotSidebar.Visibility = Visibility.Collapsed;
             if (_view is not null)
             {
@@ -616,6 +705,7 @@ public partial class MainWindow : Window
         }
 
         UpdateMetrics();
+        RefreshColumnPanel();
     }
 
     private void RefreshSheetTabs()
@@ -755,6 +845,7 @@ public partial class MainWindow : Window
             {
                 Name = string.IsNullOrWhiteSpace(item.Name) ? "Tabla dinámica" : item.Name,
                 IsPivot = true,
+                PivotSource = _sheets.FirstOrDefault(s => !s.IsPivot && !s.IsExtraView),
             };
             RestorePivotLayout(sheet, item);
             sheet.Config.ApplySaved(item.Config, MapColumn);
@@ -864,14 +955,15 @@ public partial class MainWindow : Window
 
     private void RebuildAllPivots(bool bindActive = true)
     {
-        if (_view is null)
-        {
-            return;
-        }
-
         foreach (var sheet in _sheets.Where(s => s.IsPivot && s.Config.CanBuild))
         {
-            ApplyPivotBuild(sheet, PivotEngine.Build(_view, sheet.Config));
+            var source = ResolvePivotSource(sheet);
+            if (source is null)
+            {
+                continue;
+            }
+
+            ApplyPivotBuild(sheet, PivotEngine.Build(source, sheet.Config));
         }
 
         if (bindActive && _activeSheet?.IsPivot == true)
@@ -880,9 +972,23 @@ public partial class MainWindow : Window
         }
     }
 
+    private DataView? ResolvePivotSource(WorkbookSheet pivot)
+    {
+        var table = pivot.PivotSource?.SourceTable
+                    ?? _sheets.FirstOrDefault(s => !s.IsPivot && !s.IsExtraView)?.SourceTable
+                    ?? _table;
+        return table?.DefaultView;
+    }
+
     private void RebuildPivot()
     {
-        if (_view is null || _activeSheet is not { IsPivot: true } sheet)
+        if (_activeSheet is not { IsPivot: true } sheet)
+        {
+            return;
+        }
+
+        var source = ResolvePivotSource(sheet);
+        if (source is null)
         {
             return;
         }
@@ -901,7 +1007,7 @@ public partial class MainWindow : Window
         Mouse.OverrideCursor = Cursors.Wait;
         try
         {
-            ApplyPivotBuild(sheet, PivotEngine.Build(_view, sheet.Config));
+            ApplyPivotBuild(sheet, PivotEngine.Build(source, sheet.Config));
             Grid.ItemsSource = sheet.Result?.DefaultView;
             var groups = sheet.Snapshot?.LeafCount ?? sheet.Result?.Rows.Count ?? 0;
             StatusText.Text = $"Tabla dinámica · {groups:N0} grupos"
@@ -990,17 +1096,7 @@ public partial class MainWindow : Window
         StatusText.Text = "Actualización cancelada";
     }
 
-    private void OnAddViewHint(object sender, RoutedEventArgs e)
-    {
-        if (!RequireBrowserSession())
-        {
-            return;
-        }
-
-        MessageBox.Show(this,
-            "La hoja de datos se abre desde el listado web. Use Tabla dinámica para crear otra hoja y armar el análisis, como en Excel.",
-            "Agregar vista", MessageBoxButton.OK, MessageBoxImage.Information);
-    }
+    private void OnAddView(object sender, RoutedEventArgs e) => OpenAddViewPanel();
 
     private void OnLoadingRow(object sender, DataGridRowEventArgs e)
     {
@@ -1040,7 +1136,8 @@ public partial class MainWindow : Window
                     new Setter(TextBlock.PaddingProperty, new Thickness(4, 0, 4, 0)),
                     new Setter(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center),
                     new Setter(TextBlock.HorizontalAlignmentProperty,
-                        kind is ColumnDataKind.Moneda or ColumnDataKind.Numero or ColumnDataKind.Entero
+                        kind is ColumnDataKind.Moneda or ColumnDataKind.Numero
+                            or ColumnDataKind.Entero or ColumnDataKind.Porcentaje
                             ? HorizontalAlignment.Right
                             : HorizontalAlignment.Left),
                 },
@@ -1050,6 +1147,14 @@ public partial class MainWindow : Window
                 text.Binding = new Binding(name)
                 {
                     Converter = FechaDisplayConverter.Instance,
+                };
+            }
+            else if (kind == ColumnDataKind.Porcentaje)
+            {
+                text.Binding = new Binding("[" + name.Replace("]", @"\]") + "]")
+                {
+                    Converter = PorcentajeDisplayConverter.Instance,
+                    Mode = BindingMode.OneWay,
                 };
             }
             else if (kind == ColumnDataKind.Moneda)
@@ -1091,7 +1196,9 @@ public partial class MainWindow : Window
             ? DataFileParser.FormatFecha(dt)
             : kind == ColumnDataKind.Moneda
                 ? MonedaDisplayConverter.Format(cell) ?? ""
-                : Convert.ToString(cell, CultureInfo.CurrentCulture) ?? "";
+                : kind == ColumnDataKind.Porcentaje
+                    ? PorcentajeDisplayConverter.Format(cell) ?? ""
+                    : Convert.ToString(cell, CultureInfo.CurrentCulture) ?? "";
     }
 
     private static string ColLetter(int index)
@@ -1280,7 +1387,7 @@ public partial class MainWindow : Window
             return null;
         }
 
-        var col = _table.Columns[column];
+        var col = _table.Columns[column]!;
         var isDate = col.DataType == typeof(DateTime);
         var name = isDate
             ? $"[{EscapeCol(column)}]"
@@ -1498,7 +1605,9 @@ public partial class MainWindow : Window
 
         if (_session is not null && _columnOverrides.Count == 0)
         {
-            var saved = ColumnLayoutStore.Load(_session);
+            var schema = _activeSheet?.Schema ?? _session.Schema;
+            var view = _activeSheet?.ViewName ?? _session.View;
+            var saved = ColumnLayoutStore.Load(_session, schema, view);
             if (saved?.Columns is { Count: > 0 })
             {
                 _columnOverrides.AddRange(saved.Columns);
@@ -1546,7 +1655,14 @@ public partial class MainWindow : Window
             return;
         }
 
-        ColumnLayoutStore.Save(_session, _columnOverrides);
+        var schema = _activeSheet?.Schema ?? _session.Schema;
+        var view = _activeSheet?.ViewName ?? _session.View;
+        ColumnLayoutStore.Save(_session, _columnOverrides, schema, view);
+        if (_activeSheet is { IsPivot: false })
+        {
+            _activeSheet.Overrides.Clear();
+            _activeSheet.Overrides.AddRange(_columnOverrides);
+        }
     }
 
     private static void RestorePivotLayout(WorkbookSheet sheet, SavedPivotSheet saved)
@@ -1680,6 +1796,7 @@ public partial class MainWindow : Window
             ("Moneda", "Moneda"),
             ("Entero", "Entero"),
             ("Fecha", "Fecha"),
+            ("Porcentaje", "Porcentaje"),
             ("Verdadero/Falso", "Logico"),
         })
         {
@@ -1693,6 +1810,16 @@ public partial class MainWindow : Window
 
         menu.Items.Add(rename);
         menu.Items.Add(types);
+        menu.Items.Add(new Separator());
+        var autofit = new MenuItem { Header = "Autoajustar columna" };
+        autofit.Click += (_, _) => AutoFitSelectedColumn();
+        var hide = new MenuItem { Header = "Ocultar columna" };
+        hide.Click += (_, _) => HideSelectedColumn();
+        var showAll = new MenuItem { Header = "Mostrar todas las columnas" };
+        showAll.Click += OnShowAllColumns;
+        menu.Items.Add(autofit);
+        menu.Items.Add(hide);
+        menu.Items.Add(showAll);
         menu.Items.Add(new Separator());
         menu.Items.Add(props);
         return menu;
@@ -1743,6 +1870,17 @@ public partial class MainWindow : Window
         {
             e.Handled = true;
             OpenColumnProperties();
+        }
+    }
+
+    private void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.F && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+        {
+            e.Handled = true;
+            TabFiltros.IsChecked = true;
+            SearchBox.Focus();
+            SearchBox.SelectAll();
         }
     }
 

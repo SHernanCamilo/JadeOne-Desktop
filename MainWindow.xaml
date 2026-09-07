@@ -9,7 +9,8 @@
         MinHeight="520" MinWidth="980"
         WindowStartupLocation="CenterScreen"
         FontFamily="Segoe UI"
-        Background="#F5F5F5">
+        Background="#F5F5F5"
+        PreviewKeyDown="OnWindowPreviewKeyDown">
   <Window.Resources>
     <DataTemplate x:Key="ExcelColHeaderTemplate">
       <DockPanel LastChildFill="True">
@@ -83,6 +84,8 @@
                      GroupName="Ribbon" IsChecked="True" Checked="OnRibbonTab"/>
         <RadioButton x:Name="TabFiltros" Style="{StaticResource XlTab}" Content="Filtros"
                      GroupName="Ribbon" Checked="OnRibbonTab"/>
+        <RadioButton x:Name="TabVista" Style="{StaticResource XlTab}" Content="Vista"
+                     GroupName="Ribbon" Checked="OnRibbonTab"/>
         <RadioButton x:Name="TabAnalisis" Style="{StaticResource XlTab}" Content="Análisis"
                      GroupName="Ribbon" Checked="OnRibbonTab"/>
       </StackPanel>
@@ -111,13 +114,49 @@
           </StackPanel>
           <Border Width="1" Background="#E0E0E0" Margin="0,8"/>
           <StackPanel Margin="8,4,8,2">
-            <Button Style="{StaticResource XlRibbonBtn}" Click="OnAddViewHint">
+            <Button Style="{StaticResource XlRibbonBtn}" Click="OnAddView">
               <StackPanel>
                 <TextBlock Text="＋" FontSize="16" Foreground="#217346" HorizontalAlignment="Center"/>
                 <TextBlock Text="Agregar&#x0a;vista" TextAlignment="Center"/>
               </StackPanel>
             </Button>
             <TextBlock Text="Vistas" FontSize="10.5" Foreground="#757575" HorizontalAlignment="Center"/>
+          </StackPanel>
+          <Border Width="1" Background="#E0E0E0" Margin="0,8"/>
+          <StackPanel Margin="8,4,8,2">
+            <StackPanel Orientation="Horizontal">
+              <Button Style="{StaticResource XlRibbonBtn}" Click="OnFormatCop" ToolTip="Pesos colombianos">
+                <StackPanel>
+                  <TextBlock Text="$" FontSize="16" FontWeight="SemiBold" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="COP" TextAlignment="Center"/>
+                </StackPanel>
+              </Button>
+              <Button Style="{StaticResource XlRibbonBtn}" Click="OnFormatPercent" ToolTip="Porcentaje">
+                <StackPanel>
+                  <TextBlock Text="%" FontSize="16" FontWeight="SemiBold" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Porcentaje" TextAlignment="Center"/>
+                </StackPanel>
+              </Button>
+              <Button Style="{StaticResource XlRibbonBtn}" Click="OnFormatNumber" ToolTip="Separador de miles y 2 decimales">
+                <StackPanel>
+                  <TextBlock Text="1,2" FontSize="13" FontWeight="SemiBold" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Miles" TextAlignment="Center"/>
+                </StackPanel>
+              </Button>
+              <Button Style="{StaticResource XlRibbonBtn}" Click="OnFormatInteger" ToolTip="Sin decimales">
+                <StackPanel>
+                  <TextBlock Text="#" FontSize="16" FontWeight="SemiBold" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Entero" TextAlignment="Center"/>
+                </StackPanel>
+              </Button>
+              <Button Style="{StaticResource XlRibbonBtn}" Click="OnFormatDate" ToolTip="Fecha DD/MM/YYYY">
+                <StackPanel>
+                  <TextBlock Text="📅" FontSize="13" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Fecha" TextAlignment="Center"/>
+                </StackPanel>
+              </Button>
+            </StackPanel>
+            <TextBlock Text="Formato de número" FontSize="10.5" Foreground="#757575" HorizontalAlignment="Center"/>
           </StackPanel>
           <Border Width="1" Background="#E0E0E0" Margin="0,8"/>
           <StackPanel Margin="8,4,8,2">
@@ -136,6 +175,44 @@
               </Button>
             </StackPanel>
             <TextBlock Text="Filtrar" FontSize="10.5" Foreground="#757575" HorizontalAlignment="Center"/>
+          </StackPanel>
+          <Border Width="1" Background="#E0E0E0" Margin="0,8"/>
+          <StackPanel Margin="8,4,8,2">
+            <StackPanel Orientation="Horizontal">
+              <Button Style="{StaticResource XlRibbonBtn}" Click="OnToggleTotals"
+                      ToolTip="Mostrar u ocultar sumas de columnas numéricas">
+                <StackPanel>
+                  <TextBlock Text="Σ" FontSize="16" FontWeight="SemiBold" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Fila de&#x0a;totales" TextAlignment="Center"/>
+                </StackPanel>
+              </Button>
+              <Button Style="{StaticResource XlRibbonBtn}" Click="OnFreezeColumns"
+                      ToolTip="Congelar la primera columna de datos">
+                <StackPanel>
+                  <TextBlock Text="⊣" FontSize="16" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Congelar" TextAlignment="Center"/>
+                </StackPanel>
+              </Button>
+              <Button Style="{StaticResource XlRibbonBtn}" Click="OnUnfreezeColumns"
+                      ToolTip="Descongelar columnas">
+                <StackPanel>
+                  <TextBlock Text="⊢" FontSize="16" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Descongelar" TextAlignment="Center"/>
+                </StackPanel>
+              </Button>
+            </StackPanel>
+            <TextBlock Text="Herramientas" FontSize="10.5" Foreground="#757575" HorizontalAlignment="Center"/>
+          </StackPanel>
+          <Border Width="1" Background="#E0E0E0" Margin="0,8"/>
+          <StackPanel Margin="8,4,8,2">
+            <Button Style="{StaticResource XlRibbonBtn}" Click="OnExportExcel"
+                    ToolTip="Descargar Excel con los datos de la hoja activa">
+              <StackPanel>
+                <TextBlock Text="⇩" FontSize="16" Foreground="#217346" HorizontalAlignment="Center"/>
+                <TextBlock Text="Descargar&#x0a;Excel" TextAlignment="Center"/>
+              </StackPanel>
+            </Button>
+            <TextBlock Text="Exportar" FontSize="10.5" Foreground="#757575" HorizontalAlignment="Center"/>
           </StackPanel>
           <Border Width="1" Background="#E0E0E0" Margin="0,8"/>
           <StackPanel Margin="8,4,8,2">
@@ -166,6 +243,7 @@
                     <MenuItem Header="Moneda" Tag="Moneda" Click="OnChangeColumnType"/>
                     <MenuItem Header="Entero" Tag="Entero" Click="OnChangeColumnType"/>
                     <MenuItem Header="Fecha" Tag="Fecha" Click="OnChangeColumnType"/>
+                    <MenuItem Header="Porcentaje" Tag="Porcentaje" Click="OnChangeColumnType"/>
                     <MenuItem Header="Verdadero/Falso" Tag="Logico" Click="OnChangeColumnType"/>
                     <Separator/>
                     <MenuItem Header="Más opciones..." Click="OnColumnProperties"/>
@@ -195,6 +273,48 @@
           <Button Content="Filtrar columna" Height="28" Padding="12,0" Click="OnColumnFilter"/>
         </StackPanel>
 
+        <StackPanel x:Name="RibbonVista" Orientation="Horizontal" Visibility="Collapsed">
+          <StackPanel Margin="8,4,8,2">
+            <StackPanel Orientation="Horizontal">
+              <Button Style="{StaticResource XlRibbonBtn}" Click="OnAutoFit"
+                      ToolTip="Ajustar el ancho de todas las columnas al contenido">
+                <StackPanel>
+                  <TextBlock Text="↔" FontSize="16" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Ajustar&#x0a;todo" TextAlignment="Center"/>
+                </StackPanel>
+              </Button>
+              <Button Style="{StaticResource XlRibbonBtn}" Click="OnShowAllColumns"
+                      ToolTip="Mostrar columnas ocultas">
+                <StackPanel>
+                  <TextBlock Text="◉" FontSize="14" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Mostrar&#x0a;todas" TextAlignment="Center"/>
+                </StackPanel>
+              </Button>
+              <Button Style="{StaticResource XlRibbonBtn}" Click="OnShowColumnPanel"
+                      ToolTip="Mostrar u ocultar columnas">
+                <StackPanel>
+                  <TextBlock Text="☰" FontSize="14" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Columnas" TextAlignment="Center"/>
+                </StackPanel>
+              </Button>
+            </StackPanel>
+            <TextBlock Text="Columnas" FontSize="10.5" Foreground="#757575" HorizontalAlignment="Center"/>
+          </StackPanel>
+          <Border Width="1" Background="#E0E0E0" Margin="0,8"/>
+          <StackPanel Margin="8,4,8,2">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,8,0,0">
+              <ComboBox x:Name="RowHeightCombo" Width="150" Height="28" VerticalContentAlignment="Center"
+                        SelectionChanged="OnRowHeightChanged">
+                <ComboBoxItem Content="Compacto (21 px)" Tag="21"/>
+                <ComboBoxItem Content="Normal (22 px)" Tag="22" IsSelected="True"/>
+                <ComboBoxItem Content="Cómodo (28 px)" Tag="28"/>
+                <ComboBoxItem Content="Amplio (36 px)" Tag="36"/>
+              </ComboBox>
+            </StackPanel>
+            <TextBlock Text="Densidad" FontSize="10.5" Foreground="#757575" HorizontalAlignment="Center"/>
+          </StackPanel>
+        </StackPanel>
+
         <StackPanel x:Name="RibbonAnalisis" Orientation="Horizontal" Visibility="Collapsed">
           <StackPanel Margin="8,4,8,2">
             <StackPanel Orientation="Horizontal">
@@ -208,6 +328,13 @@
                 <StackPanel>
                   <TextBlock Text="✕" FontSize="14" Foreground="#217346" HorizontalAlignment="Center"/>
                   <TextBlock Text="Limpiar" TextAlignment="Center"/>
+                </StackPanel>
+              </Button>
+              <Button Style="{StaticResource XlRibbonBtn}" Click="OnExportExcel"
+                      ToolTip="Exportar la tabla dinámica a Excel">
+                <StackPanel>
+                  <TextBlock Text="⇩" FontSize="16" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Exportar&#x0a;dinámica" TextAlignment="Center"/>
                 </StackPanel>
               </Button>
             </StackPanel>
@@ -250,6 +377,7 @@
                     <MenuItem Header="Moneda" Tag="Moneda" Click="OnChangeColumnType"/>
                     <MenuItem Header="Entero" Tag="Entero" Click="OnChangeColumnType"/>
                     <MenuItem Header="Fecha" Tag="Fecha" Click="OnChangeColumnType"/>
+                    <MenuItem Header="Porcentaje" Tag="Porcentaje" Click="OnChangeColumnType"/>
                     <MenuItem Header="Verdadero/Falso" Tag="Logico" Click="OnChangeColumnType"/>
                     <Separator/>
                     <MenuItem Header="Más opciones..." Click="OnColumnProperties"/>
@@ -348,7 +476,7 @@
                         <Style TargetType="Button">
                           <Setter Property="Visibility" Value="Collapsed"/>
                           <Style.Triggers>
-                            <DataTrigger Binding="{Binding IsPivot}" Value="True">
+                            <DataTrigger Binding="{Binding CanClose}" Value="True">
                               <Setter Property="Visibility" Value="Visible"/>
                             </DataTrigger>
                           </Style.Triggers>
@@ -385,6 +513,45 @@
                            ConfigChanged="OnPivotConfigChanged"
                            Closed="OnPivotClosed"
                            Cleared="OnPivotCleared"/>
+      <controls:AddViewPanel x:Name="AddViewSidebar" DockPanel.Dock="Right" Width="318"
+                             Visibility="Collapsed"
+                             ViewPicked="OnAddViewPicked"
+                             Closed="OnAddViewClosed"/>
+      <Border x:Name="ColumnSidebar" DockPanel.Dock="Right" Width="280" Visibility="Collapsed"
+              Background="#F7F7F7" BorderBrush="#D4D4D4" BorderThickness="1,0,0,0">
+        <DockPanel>
+          <Border DockPanel.Dock="Top" Background="#374151" Padding="10,8">
+            <DockPanel>
+              <Button DockPanel.Dock="Right" Content="✕" Width="22" Height="22"
+                      Background="Transparent" Foreground="White" BorderThickness="0"
+                      Cursor="Hand" Click="OnCloseColumnPanel" ToolTip="Cerrar"/>
+              <TextBlock Text="Columnas" Foreground="White" FontWeight="SemiBold"
+                         VerticalAlignment="Center"/>
+            </DockPanel>
+          </Border>
+          <TextBlock DockPanel.Dock="Top" Margin="10,8,10,4" TextWrapping="Wrap"
+                     Foreground="#4B5563" FontSize="11"
+                     Text="Marque las columnas que desea ver. Desmarque para ocultar."/>
+          <Button DockPanel.Dock="Top" Content="Mostrar todas" Margin="10,0,10,8"
+                  Height="26" Click="OnShowAllColumns"/>
+          <ListBox x:Name="ColumnList" BorderThickness="0" Background="Transparent"
+                   ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <CheckBox Content="{Binding Name}" IsChecked="{Binding Visible, Mode=TwoWay}"
+                          Margin="6,4" Checked="OnColumnVisibleChanged"
+                          Unchecked="OnColumnVisibleChanged"/>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </DockPanel>
+      </Border>
+      <Border x:Name="TotalsBar" DockPanel.Dock="Bottom" Height="24" Background="#E2EFDA"
+              BorderBrush="#A9D08E" BorderThickness="0,1,0,0" Visibility="Collapsed" Padding="8,0">
+        <TextBlock x:Name="TotalsText" Text="Totales" VerticalAlignment="Center"
+                   FontFamily="Calibri" FontSize="12" Foreground="#1A5C38"
+                   TextTrimming="CharacterEllipsis"/>
+      </Border>
       <Grid Background="White">
       <Grid.LayoutTransform>
         <ScaleTransform x:Name="GridZoom" ScaleX="1" ScaleY="1"/>
