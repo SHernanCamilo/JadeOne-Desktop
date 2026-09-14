@@ -135,5 +135,55 @@
         </Setter.Value>
       </Setter>
     </Style>
+
+    <!-- ============================================================= -->
+    <!-- Estilos modernos tipo Excel para la grilla de datos           -->
+    <!-- ============================================================= -->
+
+    <!-- Celda estilo Excel: selección con relleno verde suave; celda en edición
+         con borde verde y fondo blanco. -->
+    <Style x:Key="XlCell" TargetType="DataGridCell">
+      <Setter Property="Padding" Value="6,2"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="FontFamily" Value="Segoe UI"/>
+      <Setter Property="Foreground" Value="#1F2937"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="DataGridCell">
+            <Border x:Name="Cb" Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    Padding="{TemplateBinding Padding}"
+                    SnapsToDevicePixels="True">
+              <ContentPresenter VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsSelected" Value="True">
+                <Setter TargetName="Cb" Property="Background" Value="#CDE7D6"/>
+                <Setter TargetName="Cb" Property="BorderBrush" Value="#217346"/>
+                <Setter TargetName="Cb" Property="BorderThickness" Value="1"/>
+                <Setter Property="Foreground" Value="#0F3D24"/>
+              </Trigger>
+              <Trigger Property="IsEditing" Value="True">
+                <Setter TargetName="Cb" Property="Background" Value="White"/>
+                <Setter TargetName="Cb" Property="BorderBrush" Value="#217346"/>
+                <Setter TargetName="Cb" Property="BorderThickness" Value="2"/>
+                <Setter Property="Foreground" Value="#0F3D24"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!-- Fila: hover gris muy suave, como Excel moderno -->
+    <Style x:Key="XlRow" TargetType="DataGridRow">
+      <Setter Property="SnapsToDevicePixels" Value="True"/>
+      <Style.Triggers>
+        <Trigger Property="IsMouseOver" Value="True">
+          <Setter Property="Background" Value="#EEF6F0"/>
+        </Trigger>
+      </Style.Triggers>
+    </Style>
   </Application.Resources>
 </Application>

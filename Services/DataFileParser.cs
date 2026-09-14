@@ -92,11 +92,15 @@ public static class DataFileParser
     {
         var table = NewTable(knownColumns, estimatedRows);
         var intern = new StringInterner();
+        // Caché nombre-de-propiedad-JSON -> DataColumn (o null si se ignora).
+        // Se calcula una vez por nombre y evita SanitizeColumn + Contains +
+        // indexador en cada celda de cada fila (crítico para 400k-500k filas).
+        var colCache = new Dictionary<string, DataColumn?>(StringComparer.Ordinal);
         table.BeginLoadData();
         try
         {
             var rowCount = 0;
-            AddNdjsonRow(table, firstLine, intern);
+            AddNdjsonRow(table, firstLine, intern, colCache);
             rowCount++;
 
             string? line;
@@ -107,7 +111,7 @@ public static class DataFileParser
                     continue;
                 }
 
-                AddNdjsonRow(table, line, intern);
+                AddNdjsonRow(table, line, intern, colCache);
                 rowCount++;
                 if (rowCount % 8000 == 0)
                 {
@@ -126,7 +130,8 @@ public static class DataFileParser
         return table;
     }
 
-    private static void AddNdjsonRow(DataTable table, string line, StringInterner intern)
+    private static void AddNdjsonRow(
+        DataTable table, string line, StringInterner intern, Dictionary<string, DataColumn?> colCache)
     {
         var utf8 = ArrayPool<byte>.Shared.Rent(Encoding.UTF8.GetMaxByteCount(line.Length));
         try
@@ -138,17 +143,30 @@ public static class DataFileParser
                 return;
             }
 
-            EnsureColumns(table, doc.RootElement);
             var row = table.NewRow();
             foreach (var prop in doc.RootElement.EnumerateObject())
             {
-                var col = SanitizeColumn(prop.Name);
-                if (!table.Columns.Contains(col))
+                // Resolver la columna una sola vez por nombre de propiedad.
+                if (!colCache.TryGetValue(prop.Name, out var col))
                 {
-                    continue;
+                    var sanitized = SanitizeColumn(prop.Name);
+                    if (!table.Columns.Contains(sanitized))
+                    {
+                        var unique = UniqueColumn(table, sanitized);
+                        col = table.Columns.Add(unique, ColumnType(unique));
+                    }
+                    else
+                    {
+                        col = table.Columns[sanitized];
+                    }
+
+                    colCache[prop.Name] = col;
                 }
 
-                SetCell(row, table.Columns[col]!, JsonToString(prop.Value), intern);
+                if (col is not null)
+                {
+                    SetCell(row, col, JsonToString(prop.Value), intern);
+                }
             }
 
             table.Rows.Add(row);
@@ -156,19 +174,6 @@ public static class DataFileParser
         finally
         {
             ArrayPool<byte>.Shared.Return(utf8);
-        }
-    }
-
-    private static void EnsureColumns(DataTable table, JsonElement obj)
-    {
-        foreach (var prop in obj.EnumerateObject())
-        {
-            var name = SanitizeColumn(prop.Name);
-            if (!table.Columns.Contains(name))
-            {
-                var unique = UniqueColumn(table, name);
-                table.Columns.Add(unique, ColumnType(unique));
-            }
         }
     }
 

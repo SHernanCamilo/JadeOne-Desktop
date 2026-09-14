@@ -44,12 +44,26 @@ public sealed class ApiClient : IDisposable
 
         var baseUrl = OfficialApi.Normalize(apiUrl);
         var url = baseUrl + "/fabric/viewer/desktop/claim";
-        var body = JsonSerializer.Serialize(new { ticket });
+        // Enviamos la versión de la app para que el backend pueda exigir una
+        // versión mínima y bloquear ejecutables desactualizados.
+        var appVersion = UpdateService.Current is { } v
+            ? $"{Math.Max(0, v.Major)}.{Math.Max(0, v.Minor)}.{Math.Max(0, v.Build)}"
+            : "0.0.0";
+        var body = JsonSerializer.Serialize(new { ticket, app_version = appVersion });
         using var content = new StringContent(body, Encoding.UTF8, "application/json");
         using var response = await _http.PostAsync(url, content, ct).ConfigureAwait(false);
         var json = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
         var parsed = JsonSerializer.Deserialize<ClaimResponse>(json, JsonOptions)
                      ?? throw new InvalidOperationException("Respuesta de claim vacía.");
+
+        // El backend puede exigir actualización antes de dejar entrar.
+        if (parsed.UpdateRequired)
+        {
+            throw new UpdateRequiredException(
+                parsed.Message ?? "Su versión de JadeOne Desktop está desactualizada. Actualice para continuar.",
+                parsed.DownloadUrl,
+                parsed.MinVersion);
+        }
 
         if (!response.IsSuccessStatusCode || !parsed.Success || string.IsNullOrWhiteSpace(parsed.Token))
         {

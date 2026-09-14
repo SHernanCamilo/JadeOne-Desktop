@@ -17,6 +17,16 @@ public sealed class ClaimResponse
     public string? ApiUrl { get; set; }
 
     public string? User { get; set; }
+
+    // Cuando el backend rechaza por versión desactualizada.
+    [JsonPropertyName("update_required")]
+    public bool UpdateRequired { get; set; }
+
+    [JsonPropertyName("download_url")]
+    public string? DownloadUrl { get; set; }
+
+    [JsonPropertyName("min_version")]
+    public string? MinVersion { get; set; }
 }
 
 public sealed class ExportStartResponse

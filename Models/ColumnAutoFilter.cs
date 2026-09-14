@@ -11,6 +11,12 @@ public enum TextFilterOperator
     StartsWith,
     EndsWith,
     NotContains,
+    // Operadores numéricos estilo Excel
+    GreaterThan,
+    GreaterOrEqual,
+    LessThan,
+    LessOrEqual,
+    Between,
 }
 
 public sealed class ColumnAutoFilter
@@ -19,6 +25,7 @@ public sealed class ColumnAutoFilter
     public bool IncludeBlanks { get; set; } = true;
     public TextFilterOperator TextOperator { get; set; }
     public string? TextValue { get; set; }
+    public string? TextValue2 { get; set; } // segundo límite para "Entre"
 
     public DateTime? DateFrom { get; set; }
     public DateTime? DateTo { get; set; }

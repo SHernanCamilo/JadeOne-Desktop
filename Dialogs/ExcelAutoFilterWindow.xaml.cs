@@ -426,6 +426,25 @@ public partial class ExcelAutoFilterWindow : Window
     private IEnumerable<FilterValueItem> VisibleItems() =>
         ValuesList.ItemsSource as IEnumerable<FilterValueItem> ?? _all;
 
+    /// <summary>
+    /// Items que coinciden con el texto de búsqueda actual. Sirve para el
+    /// comportamiento "buscar → Aceptar filtra por lo encontrado" de Excel.
+    /// Funciona tanto en la lista plana de valores como en el árbol de fechas.
+    /// </summary>
+    private IEnumerable<FilterValueItem> VisibleFilterItems()
+    {
+        var q = SearchBox.Text.Trim();
+        if (string.IsNullOrEmpty(q))
+        {
+            return _all;
+        }
+
+        // En ambos modos (lista y árbol) filtramos _all por coincidencia de
+        // texto en el valor mostrado; es lo que el usuario ve al escribir.
+        return _all.Where(v => v.Display.Contains(q, StringComparison.OrdinalIgnoreCase)
+                               || v.Value.Contains(q, StringComparison.OrdinalIgnoreCase));
+    }
+
     private void RefreshSelectAllBox()
     {
         if (_textOnly)
@@ -539,6 +558,11 @@ public partial class ExcelAutoFilterWindow : Window
         TextOperatorLabel.Text = OperatorLabel(op);
         TextValueBox.Text = value ?? "";
         TextFilterPanel.Visibility = Visibility.Visible;
+
+        // El segundo campo solo aparece para "Entre".
+        var isBetween = op == TextFilterOperator.Between;
+        TextValue2Label.Visibility = isBetween ? Visibility.Visible : Visibility.Collapsed;
+        TextValueBox2.Visibility = isBetween ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void OnClearTextFilter(object sender, RoutedEventArgs e)
@@ -567,7 +591,8 @@ public partial class ExcelAutoFilterWindow : Window
             return;
         }
 
-        OkButton.IsEnabled = hasText || _all.Any(v => v.IsChecked);
+        var searching = !string.IsNullOrWhiteSpace(SearchBox.Text);
+        OkButton.IsEnabled = hasText || searching || _all.Any(v => v.IsChecked);
     }
 
     private void OnValuesDoubleClick(object sender, MouseButtonEventArgs e)
@@ -633,31 +658,65 @@ public partial class ExcelAutoFilterWindow : Window
         {
             Result = textOp == TextFilterOperator.None
                 ? null
-                : new ColumnAutoFilter { TextOperator = textOp, TextValue = textValue };
+                : new ColumnAutoFilter { TextOperator = textOp, TextValue = textValue, TextValue2 = TextValueBox2.Text.Trim() };
             Finish(true);
             return;
         }
 
+        // Comportamiento estilo Excel: si el usuario escribió en el buscador,
+        // al Aceptar se filtra por los resultados de la búsqueda. No hace falta
+        // deseleccionar todo primero: los items que coinciden con la búsqueda se
+        // toman como la selección (respetando cualquier desmarca manual sobre
+        // los visibles). Sin búsqueda, se usan los marcados de toda la lista.
+        var searching = !string.IsNullOrWhiteSpace(SearchBox.Text);
+
         var selected = new HashSet<string>(StringComparer.Ordinal);
         var includeBlanks = false;
-        foreach (var item in _all)
-        {
-            if (!item.IsChecked)
-            {
-                continue;
-            }
 
-            if (item.Value.Length == 0)
+        if (searching)
+        {
+            var visibles = VisibleFilterItems().ToList();
+            // Si el usuario desmarcó alguno de los visibles, respetarlo; si no
+            // tocó nada (todos marcados), filtrar por todos los visibles.
+            var anyChecked = visibles.Any(v => v.IsChecked);
+            foreach (var item in visibles)
             {
-                includeBlanks = true;
+                if (anyChecked && !item.IsChecked)
+                {
+                    continue;
+                }
+
+                if (item.Value.Length == 0)
+                {
+                    includeBlanks = true;
+                }
+                else
+                {
+                    selected.Add(item.Value);
+                }
             }
-            else
+        }
+        else
+        {
+            foreach (var item in _all)
             {
-                selected.Add(item.Value);
+                if (!item.IsChecked)
+                {
+                    continue;
+                }
+
+                if (item.Value.Length == 0)
+                {
+                    includeBlanks = true;
+                }
+                else
+                {
+                    selected.Add(item.Value);
+                }
             }
         }
 
-        var allChecked = _all.Count > 0 && _all.All(v => v.IsChecked);
+        var allChecked = !searching && _all.Count > 0 && _all.All(v => v.IsChecked);
         if (allChecked && textOp == TextFilterOperator.None)
         {
             Result = null;
@@ -670,6 +729,7 @@ public partial class ExcelAutoFilterWindow : Window
                 IncludeBlanks = includeBlanks,
                 TextOperator = textOp,
                 TextValue = textOp == TextFilterOperator.None ? null : textValue,
+                TextValue2 = textOp == TextFilterOperator.Between ? TextValueBox2.Text.Trim() : null,
             };
         }
 
@@ -695,6 +755,11 @@ public partial class ExcelAutoFilterWindow : Window
         TextFilterOperator.StartsWith => "Empieza por",
         TextFilterOperator.EndsWith => "Termina en",
         TextFilterOperator.NotContains => "No contiene",
+        TextFilterOperator.GreaterThan => "Mayor que",
+        TextFilterOperator.GreaterOrEqual => "Mayor o igual que",
+        TextFilterOperator.LessThan => "Menor que",
+        TextFilterOperator.LessOrEqual => "Menor o igual que",
+        TextFilterOperator.Between => "Entre",
         _ => "Contiene",
     };
 }

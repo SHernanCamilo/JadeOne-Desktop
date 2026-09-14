@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO;
+using System.Net.Http;
 using System.Text;
 using Microsoft.Win32;
 using System.Windows;
@@ -41,6 +42,7 @@ public partial class MainWindow : Window
     private WorkbookSheet? _activeSheet;
     private bool _didRestorePivots;
     private DispatcherTimer? _pivotSaveTimer;
+    private DispatcherTimer? _selectionTimer;
     private readonly List<ColumnOverride> _columnOverrides = new();
     private string? _selectedColumnName;
     private bool _showTotals;
@@ -55,6 +57,7 @@ public partial class MainWindow : Window
         Closed += (_, _) =>
         {
             _pivotSaveTimer?.Stop();
+            _selectionTimer?.Stop();
             SavePivotsNow();
             _openFilter?.Close();
             _loadCts?.Cancel();
@@ -70,6 +73,14 @@ public partial class MainWindow : Window
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        // Modo demo: revisar el estilo/UI sin backend ni sesión real.
+        // Se activa lanzando: JadeOneDesktop.exe "jadeone-desktop://demo"
+        if (IsDemoLaunch(_protocolUrl))
+        {
+            LoadDemo();
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(_protocolUrl)
             || !ProtocolHandler.TryParse(_protocolUrl, out _, out _))
         {
@@ -79,6 +90,79 @@ public partial class MainWindow : Window
 
         EmptyState.Visibility = Visibility.Collapsed;
         await LoadFromProtocolAsync(_protocolUrl);
+    }
+
+    private static bool IsDemoLaunch(string? url) =>
+        !string.IsNullOrWhiteSpace(url)
+        && url.Contains("demo", StringComparison.OrdinalIgnoreCase)
+        && url.StartsWith(ProtocolHandler.Scheme + ":", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Carga una tabla de ejemplo directamente (sin claim ni backend) para poder
+    /// revisar el diseño de la grilla, filtros, tabla dinámica y estilos.
+    /// </summary>
+    private void LoadDemo()
+    {
+        EmptyState.Visibility = Visibility.Collapsed;
+        TitleText.Text = "DEMO — Estilo";
+        SubtitleText.Text = "Datos de ejemplo (sin conexión)";
+        Title = "JadeOne Desktop — DEMO";
+        SavedBadge.Text = "Demo";
+
+        // Sesión ficticia para que los botones que exigen sesión funcionen.
+        _session = new LaunchSession
+        {
+            Token = "demo",
+            Schema = "demo",
+            View = "Ejemplo",
+            ViewLabel = "Ejemplo",
+            ApiUrl = "http://127.0.0.1",
+            User = "demo",
+        };
+
+        var table = BuildDemoTable();
+        _columns = table.Columns.Cast<DataColumn>()
+            .Select(c => new FabricColumn { Name = c.ColumnName, Type = c.DataType.Name })
+            .ToList();
+        FilterColumnCombo.ItemsSource = _columns;
+
+        var sheet = EnsureDataSheet();
+        BindTable(table, sheet, restorePivots: false);
+        RefreshButton.IsEnabled = false;
+        StatusText.Text = $"DEMO · {table.Rows.Count:N0} filas de ejemplo";
+    }
+
+    private static DataTable BuildDemoTable()
+    {
+        var t = new DataTable("Ejemplo");
+        t.Columns.Add("Sede", typeof(string));
+        t.Columns.Add("Especialidad", typeof(string));
+        t.Columns.Add("Profesional", typeof(string));
+        t.Columns.Add("Fecha", typeof(DateTime));
+        t.Columns.Add("Estado", typeof(string));
+        t.Columns.Add("Cantidad", typeof(int));
+        t.Columns.Add("Valor", typeof(double));
+
+        string[] sedes = { "Bogotá", "Neiva", "Florencia", "Mocoa", "Tunja" };
+        string[] esp = { "Fisioterapia", "Fonoaudiología", "Terapia Ocupacional", "Psicología" };
+        string[] profs = { "Ana Reyes", "Luis Gómez", "Gina Trujillo", "Katherine Rojas", "Paula Cadena" };
+        string[] estados = { "Confirmado", "Pendiente", "Evaluado", "Registrado" };
+
+        var rnd = new Random(7);
+        var baseDate = new DateTime(2026, 1, 1);
+        for (var i = 0; i < 250; i++)
+        {
+            t.Rows.Add(
+                sedes[rnd.Next(sedes.Length)],
+                esp[rnd.Next(esp.Length)],
+                profs[rnd.Next(profs.Length)],
+                baseDate.AddDays(rnd.Next(0, 240)).AddHours(rnd.Next(6, 20)),
+                estados[rnd.Next(estados.Length)],
+                rnd.Next(1, 40),
+                Math.Round(rnd.NextDouble() * 900000 + 50000, 2));
+        }
+
+        return t;
     }
 
     private void BlockDirectLaunch()
@@ -114,6 +198,14 @@ public partial class MainWindow : Window
         }
 
         var apiUrl = OfficialApi.Resolve(env);
+
+        // Chequeo de actualización antes de canjear el ticket. Si el usuario
+        // acepta, la app se cierra y el updater relanza la versión nueva.
+        if (await MaybeUpdateAsync(apiUrl))
+        {
+            return;
+        }
+
         ShowOverlay("Conectando...", "Canjeando ticket de sesión", true);
         try
         {
@@ -127,9 +219,223 @@ public partial class MainWindow : Window
             SavedBadge.Text = "Guardado";
             await LoadDataAsync();
         }
+        catch (UpdateRequiredException ex)
+        {
+            await ForceUpdateAsync(apiUrl, ex);
+        }
         catch (Exception ex)
         {
             ShowError(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// El backend bloqueó el claim por versión desactualizada. Ofrecemos
+    /// actualizar de inmediato; si acepta, se descarga y la app se reinicia.
+    /// Es el mecanismo que fuerza a las versiones viejas a ponerse al día.
+    /// </summary>
+    private async Task ForceUpdateAsync(string apiUrl, UpdateRequiredException ex)
+    {
+        HideOverlay();
+        var downloadUrl = string.IsNullOrWhiteSpace(ex.DownloadUrl)
+            ? apiUrl.TrimEnd('/') + "/fabric/viewer/desktop/download"
+            : ex.DownloadUrl!;
+
+        var choice = MessageBox.Show(
+            this,
+            ex.Message + "\n\n¿Desea actualizar ahora? La aplicación se descargará y reiniciará.",
+            "Actualización obligatoria",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+
+        if (choice != MessageBoxResult.Yes)
+        {
+            StatusText.Text = "Actualización requerida. Cierre y vuelva a abrir tras actualizar.";
+            Close();
+            return;
+        }
+
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+            ShowOverlay("Actualizando...", "Descargando la versión nueva", false);
+            OverlayProgress.IsIndeterminate = false;
+            var progress = new Progress<double>(p =>
+            {
+                OverlayProgress.Value = p * 100;
+                OverlayMessage.Text = $"Descargando... {p * 100:0}%";
+            });
+
+            var applied = await UpdateService.DownloadAndApplyAsync(downloadUrl, http, progress, CancellationToken.None);
+            if (applied)
+            {
+                AppLog.Info("Actualización obligatoria aplicada; cerrando para reiniciar.");
+                Application.Current.Shutdown();
+                return;
+            }
+
+            HideOverlay();
+            MessageBox.Show(this,
+                "No se pudo aplicar la actualización automáticamente. Descárguela desde la plataforma.",
+                "Actualización", MessageBoxButton.OK, MessageBoxImage.Warning);
+            Close();
+        }
+        catch (Exception dl)
+        {
+            AppLog.Error("Actualización obligatoria falló", dl);
+            HideOverlay();
+            MessageBox.Show(this, dl.Message, "Actualización", MessageBoxButton.OK, MessageBoxImage.Error);
+            Close();
+        }
+    }
+
+    /// <summary>
+    /// Se invoca cuando el usuario abre otra vista desde la web estando la app
+    /// ya abierta (instancia única). En vez de abrir otra ventana, traemos esta
+    /// al frente y ofrecemos cargar la vista como una hoja nueva aquí.
+    /// </summary>
+    public async void HandleIncomingProtocol(string protocolUrl)
+    {
+        // Traer la ventana al frente.
+        if (WindowState == WindowState.Minimized)
+        {
+            WindowState = WindowState.Normal;
+        }
+
+        Activate();
+        Topmost = true;
+        Topmost = false;
+        Focus();
+
+        if (!ProtocolHandler.TryParse(protocolUrl, out var ticket, out var env) || _session is null)
+        {
+            return;
+        }
+
+        var choice = MessageBox.Show(
+            this,
+            "Ya tiene JadeOne Desktop abierto.\n\n"
+            + "¿Desea abrir la vista solicitada como una hoja nueva en esta misma ventana?\n\n"
+            + "Sí = cargar aquí como hoja adicional.\n"
+            + "No = ignorar (seguir con lo que tiene abierto).",
+            "JadeOne Desktop ya está abierto",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+
+        if (choice != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        try
+        {
+            var apiUrl = OfficialApi.Resolve(env);
+            var session = await _api.ClaimAsync(apiUrl, ticket, CancellationToken.None);
+
+            // ¿Ya existe una hoja con esa vista? Si sí, activarla.
+            var existing = _sheets.FirstOrDefault(s =>
+                !s.IsPivot && !s.IsBlank
+                && string.Equals(s.Schema, session.Schema, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(s.ViewName, session.View, StringComparison.OrdinalIgnoreCase));
+            if (existing is not null)
+            {
+                ActivateSheet(existing);
+                StatusText.Text = $"La vista {session.ViewLabel} ya estaba abierta.";
+                return;
+            }
+
+            var loaded = _sheets.Count(s => !s.IsPivot && s.SourceTable is not null);
+            if (loaded >= MaxLoadedViews)
+            {
+                MessageBox.Show(this,
+                    $"Máximo {MaxLoadedViews} vistas cargadas a la vez. Cierre una hoja antes de abrir otra.",
+                    "Abrir vista", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var sheet = new WorkbookSheet
+            {
+                Name = session.ViewLabel,
+                Schema = session.Schema,
+                ViewName = session.View,
+                IsExtraView = true,
+            };
+            _sheets.Add(sheet);
+            RefreshSheetTabs();
+            ActivateSheet(sheet, capture: true);
+            await LoadDataAsync(sheet);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"No se pudo cargar la vista entrante: {ex.Message}");
+            ShowError(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Consulta si hay una versión nueva publicada. Si la hay y el usuario
+    /// acepta, la descarga y lanza el updater. Devuelve true cuando se está
+    /// aplicando la actualización (el llamador debe detener el arranque).
+    /// </summary>
+    private async Task<bool> MaybeUpdateAsync(string apiUrl)
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+        try
+        {
+            ShowOverlay("Buscando actualizaciones...", "Comprobando la última versión", true);
+            var info = await UpdateService.CheckAsync(apiUrl, http, CancellationToken.None);
+            HideOverlay();
+
+            if (info is null
+                || !info.Available
+                || string.IsNullOrWhiteSpace(info.DownloadUrl)
+                || !UpdateService.IsNewer(info.Version))
+            {
+                return false;
+            }
+
+            var choice = MessageBox.Show(
+                this,
+                $"Hay una versión nueva de JadeOne Desktop disponible.\n\n"
+                + $"Actual: {UpdateService.Current.Major}.{UpdateService.Current.Minor}.{UpdateService.Current.Build}\n"
+                + $"Nueva: {info.Version}\n\n"
+                + "¿Desea actualizar ahora? La aplicación se reiniciará automáticamente.",
+                "Actualización disponible",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Information);
+
+            if (choice != MessageBoxResult.Yes)
+            {
+                return false;
+            }
+
+            ShowOverlay("Actualizando...", "Descargando la versión nueva", false);
+            OverlayProgress.IsIndeterminate = false;
+            var progress = new Progress<double>(p =>
+            {
+                OverlayProgress.Value = p * 100;
+                OverlayMessage.Text = $"Descargando... {p * 100:0}%";
+            });
+
+            var applied = await UpdateService.DownloadAndApplyAsync(info.DownloadUrl, http, progress, CancellationToken.None);
+            if (applied)
+            {
+                AppLog.Info($"Actualizando a versión {info.Version}; cerrando para aplicar.");
+                Application.Current.Shutdown();
+                return true;
+            }
+
+            HideOverlay();
+            MessageBox.Show(this,
+                "No se pudo aplicar la actualización. Se continuará con la versión actual.",
+                "Actualización", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"Actualización omitida por error: {ex.Message}");
+            HideOverlay();
+            return false;
         }
     }
 
@@ -375,6 +681,19 @@ public partial class MainWindow : Window
     private void BindTable(DataTable table, WorkbookSheet sheet, bool restorePivots)
     {
         _openFilter?.Close();
+
+        // Preservar filtros al ACTUALIZAR la misma vista: si la tabla recargada
+        // tiene las mismas columnas, conservamos los autofiltros, la búsqueda,
+        // el filtro de columna y el orden para reaplicarlos tras el bind.
+        var samas = sheet.SourceTable is not null
+                    && ColumnsMatch(sheet.SourceTable, table);
+        var preservedFilters = samas
+            ? new Dictionary<string, ColumnAutoFilter>(_columnFilters, StringComparer.OrdinalIgnoreCase)
+            : null;
+        var preservedSearch = samas ? SearchBox.Text : null;
+        var preservedColText = samas ? ColumnFilterBox.Text : null;
+        var preservedSort = samas ? _view?.Sort : null;
+
         _columnFilters.Clear();
         _selectedColumnName = null;
 
@@ -391,6 +710,23 @@ public partial class MainWindow : Window
         sheet.Filters.Clear();
         sheet.Overrides.Clear();
         sheet.Overrides.AddRange(_columnOverrides);
+
+        // Restaurar filtros preservados sobre la nueva tabla.
+        if (preservedFilters is { Count: > 0 })
+        {
+            foreach (var kv in preservedFilters)
+            {
+                if (table.Columns.Contains(kv.Key))
+                {
+                    _columnFilters[kv.Key] = kv.Value;
+                }
+            }
+        }
+
+        if (!string.IsNullOrEmpty(preservedSort) && _view is not null)
+        {
+            try { _view.Sort = preservedSort; } catch { /* columna pudo cambiar */ }
+        }
 
         if (old is not null
             && !ReferenceEquals(old, table)
@@ -412,6 +748,43 @@ public partial class MainWindow : Window
 
         RebuildAllPivots(bindActive: false);
         ActivateSheet(prefer ?? sheet, capture: false);
+
+        // Reaplicar la búsqueda/filtro de texto preservados (dispara ApplyFilters,
+        // que también reconstruye los pivotes con los datos ya filtrados).
+        if (preservedSearch is not null || preservedColText is not null || _columnFilters.Count > 0)
+        {
+            if (preservedSearch is not null)
+            {
+                SearchBox.Text = preservedSearch;
+            }
+
+            if (preservedColText is not null)
+            {
+                ColumnFilterBox.Text = preservedColText;
+            }
+
+            ApplyFilters();
+            RefreshHeaderFilterIcons();
+        }
+    }
+
+    /// <summary>True si dos tablas tienen el mismo conjunto de columnas (por nombre).</summary>
+    private static bool ColumnsMatch(DataTable a, DataTable b)
+    {
+        if (a.Columns.Count != b.Columns.Count)
+        {
+            return false;
+        }
+
+        foreach (DataColumn c in a.Columns)
+        {
+            if (!b.Columns.Contains(c.ColumnName))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private WorkbookSheet EnsureDataSheet()
@@ -484,15 +857,68 @@ public partial class MainWindow : Window
             }
         }
 
+        // Aplicar el filtro combinado. Si falla (una cláusula inválida), NO
+        // borramos todos los filtros: reintentamos descartando solo las
+        // cláusulas que rompen, para no perder el resto (síntoma "se dañan").
+        var applied = TrySetRowFilter(string.Join(" AND ", parts));
+        if (!applied)
+        {
+            var valid = new List<string>();
+            foreach (var part in parts)
+            {
+                if (SafeToAdd(valid, part))
+                {
+                    valid.Add(part);
+                }
+                else
+                {
+                    AppLog.Warn($"Cláusula de filtro descartada por inválida: {part}");
+                }
+            }
+
+            TrySetRowFilter(string.Join(" AND ", valid));
+        }
+
+        UpdateMetrics();
+        RebuildPivotsUsing(_table);
+    }
+
+    /// <summary>Intenta fijar el RowFilter; devuelve false si la expresión es inválida.</summary>
+    private bool TrySetRowFilter(string expression)
+    {
+        if (_view is null)
+        {
+            return false;
+        }
+
         try
         {
-            _view.RowFilter = string.Join(" AND ", parts);
-            UpdateMetrics();
-            RebuildPivotsUsing(_table);
+            _view.RowFilter = expression;
+            return true;
         }
         catch
         {
-            _view.RowFilter = "";
+            return false;
+        }
+    }
+
+    /// <summary>Comprueba si agregar una cláusula al conjunto sigue siendo válido.</summary>
+    private bool SafeToAdd(List<string> current, string candidate)
+    {
+        if (_view is null)
+        {
+            return false;
+        }
+
+        var test = current.Count == 0 ? candidate : string.Join(" AND ", current) + " AND " + candidate;
+        try
+        {
+            _view.RowFilter = test;
+            return true;
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -685,15 +1111,29 @@ public partial class MainWindow : Window
             AddViewSidebar.Visibility = Visibility.Collapsed;
             ColumnSidebar.Visibility = Visibility.Collapsed;
             PivotSidebar.Visibility = Visibility.Visible;
+            Grid.IsReadOnly = true;
             Grid.ItemsSource = sheet.Result?.DefaultView;
             TabAnalisis.IsChecked = true;
             StatusText.Text = sheet.Config.CanBuild
                 ? $"Tabla dinámica · {sheet.Snapshot?.LeafCount ?? sheet.Result?.Rows.Count ?? 0:N0} grupos"
                 : "Arrastre campos a Filas, Columnas o Valores.";
         }
+        else if (sheet.IsBlank)
+        {
+            PivotSidebar.Visibility = Visibility.Collapsed;
+            AddViewSidebar.Visibility = Visibility.Collapsed;
+            ColumnSidebar.Visibility = Visibility.Collapsed;
+            _table = sheet.SourceTable;
+            _view = sheet.SourceTable?.DefaultView;
+            Grid.IsReadOnly = false; // editable como Excel
+            Grid.ItemsSource = _view;
+            TabDatos.IsChecked = true;
+            StatusText.Text = "Hoja en blanco (editable)";
+        }
         else
         {
             RestoreDataState(sheet);
+            Grid.IsReadOnly = true;
             PivotSidebar.Visibility = Visibility.Collapsed;
             if (_view is not null)
             {
@@ -704,6 +1144,7 @@ public partial class MainWindow : Window
             StatusText.Text = $"{_view?.Count ?? 0:N0} registros";
         }
 
+        RefreshPivotFilterBar();
         UpdateMetrics();
         RefreshColumnPanel();
     }
@@ -738,6 +1179,7 @@ public partial class MainWindow : Window
         _activeSheet.Result = null;
         _activeSheet.Snapshot = null;
         Grid.ItemsSource = null;
+        RefreshPivotFilterBar();
         UpdateMetrics();
         StatusText.Text = "Tabla dinámica limpiada. Arrastre campos para volver a armarla.";
         ScheduleSavePivots();
@@ -1004,11 +1446,37 @@ public partial class MainWindow : Window
             return;
         }
 
-        Mouse.OverrideCursor = Cursors.Wait;
+        RebuildPivotAsync(sheet, source);
+    }
+
+    /// <summary>
+    /// Construye el pivote en segundo plano para no congelar la ventana con
+    /// vistas grandes. Muestra un overlay de progreso mientras trabaja.
+    /// </summary>
+    private async void RebuildPivotAsync(WorkbookSheet sheet, DataView source)
+    {
+        // Snapshot inmutable de la config para pasarlo al hilo de fondo sin
+        // riesgo de que cambie mientras se calcula.
+        var rowCount = source.Count;
+        var showOverlay = rowCount > 20_000; // solo para volúmenes que se notan
+        if (showOverlay)
+        {
+            ShowOverlay("Armando tabla dinámica...", $"Procesando {rowCount:N0} filas", true);
+        }
+
         try
         {
-            ApplyPivotBuild(sheet, PivotEngine.Build(source, sheet.Config));
+            var built = await Task.Run(() => PivotEngine.Build(source, sheet.Config));
+            // Si el usuario cambió de hoja mientras calculaba, no pisar la UI.
+            if (!ReferenceEquals(_activeSheet, sheet))
+            {
+                built.Table?.Dispose();
+                return;
+            }
+
+            ApplyPivotBuild(sheet, built);
             Grid.ItemsSource = sheet.Result?.DefaultView;
+            RefreshPivotFilterBar();
             var groups = sheet.Snapshot?.LeafCount ?? sheet.Result?.Rows.Count ?? 0;
             StatusText.Text = $"Tabla dinámica · {groups:N0} grupos"
                               + (sheet.Config.Columns.Count > 0
@@ -1018,11 +1486,15 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
+            AppLog.Error("Tabla dinámica falló", ex);
             MessageBox.Show(this, ex.Message, "Tabla dinámica", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
-            Mouse.OverrideCursor = null;
+            if (showOverlay)
+            {
+                HideOverlay();
+            }
         }
     }
 
@@ -1165,6 +1637,113 @@ public partial class MainWindow : Window
                     Mode = BindingMode.OneWay,
                 };
             }
+        }
+    }
+
+    /// <summary>
+    /// Resumen de la selección en la barra de estado, como Excel:
+    /// Promedio · Recuento · Suma (y Mín/Máx) de las celdas numéricas seleccionadas.
+    /// </summary>
+    private void OnSelectedCellsChanged(object? sender, SelectedCellsChangedEventArgs e)
+    {
+        if (SelectionSummaryText is null)
+        {
+            return;
+        }
+
+        // Debounce: al arrastrar la selección este evento se dispara cientos de
+        // veces. En vez de recalcular en cada uno, esperamos a que la selección
+        // se estabilice (~120 ms) y calculamos una sola vez.
+        _selectionTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
+        _selectionTimer.Tick -= OnSelectionTick;
+        _selectionTimer.Tick += OnSelectionTick;
+        _selectionTimer.Stop();
+        _selectionTimer.Start();
+    }
+
+    private void OnSelectionTick(object? sender, EventArgs e)
+    {
+        _selectionTimer?.Stop();
+        ComputeSelectionSummary();
+    }
+
+    private void ComputeSelectionSummary()
+    {
+        if (SelectionSummaryText is null)
+        {
+            return;
+        }
+
+        var cells = Grid.SelectedCells;
+        if (cells is null || cells.Count <= 1)
+        {
+            SelectionSummaryText.Text = "";
+            return;
+        }
+
+        // Tope de seguridad: sumar cientos de miles de celdas al vuelo no aporta
+        // y podría trabar la UI. Excel también limita el cálculo en la barra.
+        const int maxCells = 100_000;
+        if (cells.Count > maxCells)
+        {
+            SelectionSummaryText.Text = $"Recuento: {cells.Count:N0} (selección muy grande)";
+            return;
+        }
+
+        var es = CultureInfo.GetCultureInfo("es-CO");
+        var count = 0;
+        var numCount = 0;
+        double sum = 0, min = double.MaxValue, max = double.MinValue;
+
+        foreach (var cell in cells)
+        {
+            if (cell.Item is not DataRowView row || cell.Column is null)
+            {
+                continue;
+            }
+
+            var name = ColumnKey(cell.Column);
+            if (string.IsNullOrEmpty(name)
+                || PivotEngine.IsHiddenColumn(name)
+                || !row.Row.Table.Columns.Contains(name))
+            {
+                continue;
+            }
+
+            count++;
+            var raw = row[name];
+            if (raw is DBNull or null)
+            {
+                continue;
+            }
+
+            if (double.TryParse(Convert.ToString(raw, CultureInfo.InvariantCulture),
+                    NumberStyles.Any, CultureInfo.InvariantCulture, out var v)
+                || double.TryParse(Convert.ToString(raw, es),
+                    NumberStyles.Any, es, out v))
+            {
+                numCount++;
+                sum += v;
+                if (v < min) min = v;
+                if (v > max) max = v;
+            }
+        }
+
+        if (count <= 1)
+        {
+            SelectionSummaryText.Text = "";
+            return;
+        }
+
+        if (numCount >= 2)
+        {
+            var avg = sum / numCount;
+            SelectionSummaryText.Text =
+                $"Promedio: {avg.ToString("N2", es)}   Recuento: {count}   Mín: {min.ToString("N2", es)}   Máx: {max.ToString("N2", es)}   Suma: {sum.ToString("N2", es)}";
+        }
+        else
+        {
+            SelectionSummaryText.Text = $"Recuento: {count}";
         }
     }
 
@@ -1338,6 +1917,12 @@ public partial class MainWindow : Window
             return (items, true);
         }
 
+        // Para columnas de fecha/hora agrupamos por DÍA (ignoramos la hora),
+        // igual que el árbol Año>Mes>Día de Excel. Así una columna datetime con
+        // miles de timestamps únicos no revienta el umbral ni cae en "textOnly":
+        // lo que importa para el filtro por lista son los días distintos.
+        var isDateCol = _table.Columns[column]!.DataType == typeof(DateTime);
+
         var set = new HashSet<string>(StringComparer.Ordinal);
         var blanks = false;
         foreach (DataRow row in _table.Rows)
@@ -1350,11 +1935,16 @@ public partial class MainWindow : Window
             }
             else if (raw is DateTime dt)
             {
-                s = DataFileParser.FormatFecha(dt);
+                // Solo la fecha (sin hora) para el árbol y la lista de valores.
+                s = dt.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
             }
             else
             {
-                s = Convert.ToString(raw, CultureInfo.CurrentCulture) ?? "";
+                // IMPORTANTE: usar InvariantCulture, la MISMA representación que
+                // usa el RowFilter con CONVERT(col,'System.String'). Con
+                // CurrentCulture, números/decimales/bool no coincidían y el
+                // filtro "no mostraba nada".
+                s = Convert.ToString(raw, CultureInfo.InvariantCulture) ?? "";
             }
             if (s.Length == 0)
             {
@@ -1363,7 +1953,9 @@ public partial class MainWindow : Window
             }
 
             set.Add(s);
-            if (set.Count > maxValues)
+            // Las columnas de fecha nunca caen en textOnly: por muchos días que
+            // haya, el árbol Año>Mes>Día los organiza sin problema.
+            if (!isDateCol && set.Count > maxValues)
             {
                 return (items, true);
             }
@@ -1389,6 +1981,9 @@ public partial class MainWindow : Window
 
         var col = _table.Columns[column]!;
         var isDate = col.DataType == typeof(DateTime);
+        var isNumeric = col.DataType == typeof(double) || col.DataType == typeof(decimal)
+            || col.DataType == typeof(float) || col.DataType == typeof(int)
+            || col.DataType == typeof(long) || col.DataType == typeof(short);
         var name = isDate
             ? $"[{EscapeCol(column)}]"
             : $"CONVERT([{EscapeCol(column)}], 'System.String')";
@@ -1408,15 +2003,57 @@ public partial class MainWindow : Window
             var textCol = $"CONVERT([{EscapeCol(column)}], 'System.String')";
             var escaped = EscapeFilter(filter.TextValue);
             var literal = filter.TextValue.Replace("'", "''");
-            parts.Add(filter.TextOperator switch
+
+            // Operadores numéricos (mayor/menor/entre): comparar por VALOR sobre
+            // la columna cruda si es numérica; si no, sobre su versión numérica.
+            var numOps = filter.TextOperator is TextFilterOperator.GreaterThan
+                or TextFilterOperator.GreaterOrEqual or TextFilterOperator.LessThan
+                or TextFilterOperator.LessOrEqual or TextFilterOperator.Between;
+
+            if (numOps && double.TryParse(filter.TextValue, NumberStyles.Any, CultureInfo.InvariantCulture, out var n1))
             {
-                TextFilterOperator.Equals => $"{textCol} = '{literal}'",
-                TextFilterOperator.NotEquals => $"{textCol} <> '{literal}'",
-                TextFilterOperator.StartsWith => $"{textCol} LIKE '{escaped}%'",
-                TextFilterOperator.EndsWith => $"{textCol} LIKE '%{escaped}'",
-                TextFilterOperator.NotContains => $"NOT ({textCol} LIKE '%{escaped}%')",
-                _ => $"{textCol} LIKE '%{escaped}%'",
-            });
+                var numCol = isNumeric ? $"[{EscapeCol(column)}]" : $"CONVERT([{EscapeCol(column)}], 'System.Double')";
+                var lit1 = n1.ToString(CultureInfo.InvariantCulture);
+                switch (filter.TextOperator)
+                {
+                    case TextFilterOperator.GreaterThan:
+                        parts.Add($"{numCol} > {lit1}");
+                        break;
+                    case TextFilterOperator.GreaterOrEqual:
+                        parts.Add($"{numCol} >= {lit1}");
+                        break;
+                    case TextFilterOperator.LessThan:
+                        parts.Add($"{numCol} < {lit1}");
+                        break;
+                    case TextFilterOperator.LessOrEqual:
+                        parts.Add($"{numCol} <= {lit1}");
+                        break;
+                    case TextFilterOperator.Between:
+                        if (double.TryParse(filter.TextValue2, NumberStyles.Any, CultureInfo.InvariantCulture, out var n2))
+                        {
+                            var lo = Math.Min(n1, n2).ToString(CultureInfo.InvariantCulture);
+                            var hi = Math.Max(n1, n2).ToString(CultureInfo.InvariantCulture);
+                            parts.Add($"({numCol} >= {lo} AND {numCol} <= {hi})");
+                        }
+                        else
+                        {
+                            parts.Add($"{numCol} >= {lit1}");
+                        }
+                        break;
+                }
+            }
+            else
+            {
+                parts.Add(filter.TextOperator switch
+                {
+                    TextFilterOperator.Equals => $"{textCol} = '{literal}'",
+                    TextFilterOperator.NotEquals => $"{textCol} <> '{literal}'",
+                    TextFilterOperator.StartsWith => $"{textCol} LIKE '{escaped}%'",
+                    TextFilterOperator.EndsWith => $"{textCol} LIKE '%{escaped}'",
+                    TextFilterOperator.NotContains => $"NOT ({textCol} LIKE '%{escaped}%')",
+                    _ => $"{textCol} LIKE '%{escaped}%'",
+                });
+            }
         }
 
         if (filter.Selected is not null)
@@ -1431,12 +2068,47 @@ public partial class MainWindow : Window
             {
                 if (isDate)
                 {
+                    // Los valores seleccionados son días (dd/MM/yyyy). Filtramos
+                    // por rango [día, día+1) para incluir cualquier hora de ese día.
+                    // Si un valor no parsea como fecha (dato mixto), caemos a
+                    // comparación de texto para no excluir filas silenciosamente.
                     foreach (var v in chunk)
                     {
                         if (DataFileParser.TryParseFecha(v, out var dt))
                         {
-                            valueParts.Add($"{name} = #{dt:MM/dd/yyyy HH:mm:ss}#");
+                            var d = dt.Date;
+                            valueParts.Add($"({name} >= #{d:MM/dd/yyyy}# AND {name} < #{d.AddDays(1):MM/dd/yyyy}#)");
                         }
+                        else
+                        {
+                            var textCol = $"CONVERT([{EscapeCol(column)}], 'System.String')";
+                            valueParts.Add($"{textCol} = '{v.Replace("'", "''")}'");
+                        }
+                    }
+                }
+                else if (isNumeric)
+                {
+                    // Columnas numéricas: comparar por VALOR, no por texto.
+                    // CONVERT(col,'System.String') depende de la cultura y no
+                    // coincidía con el string de la lista -> el filtro daba 0.
+                    // Usamos el nombre crudo [col] con literales numéricos
+                    // invariantes (los que no parsean se comparan como texto).
+                    var nums = new List<string>();
+                    foreach (var v in chunk)
+                    {
+                        if (double.TryParse(v, NumberStyles.Any, CultureInfo.InvariantCulture, out var d))
+                        {
+                            nums.Add(d.ToString(CultureInfo.InvariantCulture));
+                        }
+                        else
+                        {
+                            valueParts.Add($"CONVERT([{EscapeCol(column)}], 'System.String') = '{v.Replace("'", "''")}'");
+                        }
+                    }
+
+                    if (nums.Count > 0)
+                    {
+                        valueParts.Add($"[{EscapeCol(column)}] IN ({string.Join(",", nums)})");
                     }
                 }
                 else
@@ -1496,17 +2168,81 @@ public partial class MainWindow : Window
         var point = fromDevice.Transform(screen);
         window.Left = point.X;
         window.Top = point.Y;
-        if (window.Left + window.Width > SystemParameters.WorkArea.Right)
+
+        // Acotar el popup al MONITOR donde está la ventana propietaria (no al
+        // primario). SystemParameters.WorkArea es solo el monitor primario, lo
+        // que hacía que el filtro saltara a la pantalla 1 en multi-monitor.
+        var bounds = MonitorBoundsFor(window.Owner ?? window);
+        var height = window.Height > 0 ? window.Height : 428;
+        var width = window.Width > 0 ? window.Width : 300;
+
+        if (window.Left + width > bounds.Right)
         {
-            window.Left = Math.Max(0, SystemParameters.WorkArea.Right - window.Width);
+            window.Left = Math.Max(bounds.Left, bounds.Right - width);
         }
 
-        var height = window.Height > 0 ? window.Height : 428;
-        if (window.Top + height > SystemParameters.WorkArea.Bottom)
+        if (window.Left < bounds.Left)
         {
-            window.Top = Math.Max(0, point.Y - height - target.ActualHeight);
+            window.Left = bounds.Left;
+        }
+
+        if (window.Top + height > bounds.Bottom)
+        {
+            // Abrir hacia arriba del anclaje si no cabe debajo.
+            window.Top = Math.Max(bounds.Top, point.Y - height - target.ActualHeight);
         }
     }
+
+    /// <summary>
+    /// Límites (en unidades WPF) del monitor donde está la ventana dada. Usa
+    /// Win32 (MonitorFromWindow + GetMonitorInfo) para soportar multi-monitor
+    /// sin depender de WinForms.
+    /// </summary>
+    private static Rect MonitorBoundsFor(Window win)
+    {
+        try
+        {
+            var hwnd = new System.Windows.Interop.WindowInteropHelper(win).Handle;
+            if (hwnd != IntPtr.Zero)
+            {
+                const uint MONITOR_DEFAULTTONEAREST = 2;
+                var monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+                if (monitor != IntPtr.Zero)
+                {
+                    var info = new MONITORINFO { cbSize = System.Runtime.InteropServices.Marshal.SizeOf<MONITORINFO>() };
+                    if (GetMonitorInfo(monitor, ref info))
+                    {
+                        var wa = info.rcWork; // píxeles del dispositivo
+                        var src = PresentationSource.FromVisual(win);
+                        var m = src?.CompositionTarget?.TransformFromDevice ?? Matrix.Identity;
+                        var topLeft = m.Transform(new Point(wa.left, wa.top));
+                        var bottomRight = m.Transform(new Point(wa.right, wa.bottom));
+                        return new Rect(topLeft, bottomRight);
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Fallback abajo.
+        }
+
+        return new Rect(
+            SystemParameters.WorkArea.Left, SystemParameters.WorkArea.Top,
+            SystemParameters.WorkArea.Width, SystemParameters.WorkArea.Height);
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Auto)]
+    private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct RECT { public int left, top, right, bottom; }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct MONITORINFO { public int cbSize; public RECT rcMonitor; public RECT rcWork; public uint dwFlags; }
 
     private static string EscapeFilter(string value) =>
         value.Replace("'", "''").Replace("[", "[[").Replace("]", "]]").Replace("%", "[%]").Replace("*", "[*]");
@@ -1871,6 +2607,87 @@ public partial class MainWindow : Window
             e.Handled = true;
             OpenColumnProperties();
         }
+
+        // Pegar estilo Excel (Ctrl+V) solo en hojas en blanco editables.
+        if (e.Key == Key.V && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control
+            && _activeSheet is { IsBlank: true })
+        {
+            e.Handled = true;
+            PasteIntoBlankSheet();
+        }
+    }
+
+    /// <summary>
+    /// Pega el contenido del portapapeles (texto tabulado, como copia Excel) en
+    /// la hoja en blanco a partir de la celda actual, expandiendo filas y
+    /// columnas si es necesario.
+    /// </summary>
+    private void PasteIntoBlankSheet()
+    {
+        if (_table is null || !Clipboard.ContainsText())
+        {
+            return;
+        }
+
+        var text = Clipboard.GetText();
+        if (string.IsNullOrEmpty(text))
+        {
+            return;
+        }
+
+        var rows = text.Replace("\r\n", "\n").Replace('\r', '\n')
+            .Split('\n', StringSplitOptions.None);
+        // Quitar última línea vacía típica del portapapeles.
+        if (rows.Length > 1 && rows[^1].Length == 0)
+        {
+            rows = rows[..^1];
+        }
+
+        var startRow = Grid.Items.IndexOf(Grid.CurrentItem);
+        if (startRow < 0)
+        {
+            startRow = 0;
+        }
+
+        var startCol = Grid.CurrentCell.Column is null ? 0 : Grid.Columns.IndexOf(Grid.CurrentCell.Column);
+        if (startCol < 0)
+        {
+            startCol = 0;
+        }
+
+        _table.BeginLoadData();
+        try
+        {
+            for (var r = 0; r < rows.Length; r++)
+            {
+                var cells = rows[r].Split('\t');
+                var targetRow = startRow + r;
+                while (targetRow >= _table.Rows.Count)
+                {
+                    _table.Rows.Add(_table.NewRow());
+                }
+
+                for (var c = 0; c < cells.Length; c++)
+                {
+                    var targetCol = startCol + c;
+                    while (targetCol >= _table.Columns.Count)
+                    {
+                        _table.Columns.Add(ColLetter(_table.Columns.Count), typeof(string));
+                    }
+
+                    _table.Rows[targetRow][targetCol] = cells[c];
+                }
+            }
+        }
+        finally
+        {
+            _table.EndLoadData();
+        }
+
+        // Rebindear para reflejar columnas nuevas si se agregaron.
+        Grid.ItemsSource = null;
+        Grid.ItemsSource = _table.DefaultView;
+        StatusText.Text = "Contenido pegado";
     }
 
     private void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)

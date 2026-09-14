@@ -1,0 +1,65 @@
+<Window x:Class="SaraBI.Dialogs.CalcColumnDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Columna calculada"
+        Height="520" Width="640"
+        WindowStartupLocation="CenterOwner"
+        FontFamily="Segoe UI"
+        Background="#F5F5F5"
+        ResizeMode="CanResize"
+        MinHeight="440" MinWidth="520">
+  <DockPanel Margin="14">
+    <!-- Encabezado -->
+    <StackPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+      <TextBlock Text="Nueva columna calculada" FontSize="16" FontWeight="SemiBold" Foreground="#1A5C38"/>
+      <TextBlock Text="Escriba una fórmula usando las columnas entre corchetes, p. ej. [Cantidad] * [Precio]"
+                 Foreground="#4B5563" FontSize="12" TextWrapping="Wrap" Margin="0,2,0,0"/>
+    </StackPanel>
+
+    <!-- Botones inferiores -->
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+      <Button Content="Cancelar" Width="90" Height="30" Margin="0,0,8,0" Click="OnCancel"/>
+      <Button x:Name="OkButton" Content="Crear columna" Width="130" Height="30"
+              Background="#217346" Foreground="White" FontWeight="SemiBold" BorderThickness="0"
+              Cursor="Hand" Click="OnOk"/>
+    </StackPanel>
+
+    <!-- Nombre -->
+    <StackPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+      <TextBlock Text="Nombre de la columna" FontWeight="SemiBold" Margin="0,0,0,3"/>
+      <TextBox x:Name="NameBox" Height="28" Padding="6,4" VerticalContentAlignment="Center"/>
+    </StackPanel>
+
+    <!-- Fórmula -->
+    <StackPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+      <TextBlock Text="Fórmula" FontWeight="SemiBold" Margin="0,0,0,3"/>
+      <TextBox x:Name="FormulaBox" Height="80" Padding="6,4" AcceptsReturn="True"
+               TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+               FontFamily="Consolas" FontSize="13" TextChanged="OnFormulaChanged"/>
+      <TextBlock x:Name="ErrorText" Foreground="#C0392B" FontSize="11.5" Margin="0,4,0,0"
+                 TextWrapping="Wrap" Visibility="Collapsed"/>
+    </StackPanel>
+
+    <!-- Ayuda: columnas + funciones -->
+    <Grid>
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*"/>
+        <ColumnDefinition Width="*"/>
+      </Grid.ColumnDefinitions>
+
+      <DockPanel Grid.Column="0" Margin="0,0,6,0">
+        <TextBlock DockPanel.Dock="Top" Text="Columnas (doble clic para insertar)" FontWeight="SemiBold" Margin="0,0,0,3"/>
+        <Border BorderBrush="#D4D4D4" BorderThickness="1" Background="White">
+          <ListBox x:Name="ColumnsList" BorderThickness="0" MouseDoubleClick="OnColumnPick"/>
+        </Border>
+      </DockPanel>
+
+      <DockPanel Grid.Column="1" Margin="6,0,0,0">
+        <TextBlock DockPanel.Dock="Top" Text="Funciones (doble clic para insertar)" FontWeight="SemiBold" Margin="0,0,0,3"/>
+        <Border BorderBrush="#D4D4D4" BorderThickness="1" Background="White">
+          <ListBox x:Name="FunctionsList" BorderThickness="0" MouseDoubleClick="OnFunctionPick"/>
+        </Border>
+      </DockPanel>
+    </Grid>
+  </DockPanel>
+</Window>

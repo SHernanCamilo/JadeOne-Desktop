@@ -7,8 +7,9 @@ public sealed class WorkbookSheet
     public string Name { get; set; } = "Hoja1";
     public bool IsPivot { get; set; }
     public bool IsExtraView { get; set; }
+    public bool IsBlank { get; set; }
     public bool IsActive { get; set; }
-    public bool CanClose => IsPivot || IsExtraView;
+    public bool CanClose => IsPivot || IsExtraView || IsBlank;
     public string? Schema { get; set; }
     public string? ViewName { get; set; }
     public string? LastJobId { get; set; }

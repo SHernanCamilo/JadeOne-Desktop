@@ -48,8 +48,11 @@ public static class PivotEngine
         }
 
         var crossNames = new Dictionary<string, string>(StringComparer.Ordinal);
+        var valueNames = new Dictionary<string, string>(StringComparer.Ordinal);
         string? totalName = null;
         string? valueName = null;
+        var multiValues = !hasCross && snapshot.Values.Count > 1;
+
         if (hasCross)
         {
             foreach (var c in snapshot.Cross)
@@ -62,6 +65,17 @@ public static class PivotEngine
             totalName = UniqueName(table, "Total");
             table.Columns.Add(totalName, typeof(double));
         }
+        else if (multiValues)
+        {
+            // Una columna por cada campo de Valores (clave "v0","v1"...).
+            for (var vi = 0; vi < snapshot.Values.Count; vi++)
+            {
+                var label = snapshot.Values[vi].Column.Length == 0 ? "Conteo" : snapshot.Values[vi].Label;
+                var name = UniqueName(table, label);
+                table.Columns.Add(name, typeof(double));
+                valueNames["v" + vi.ToString(CultureInfo.InvariantCulture)] = name;
+            }
+        }
         else
         {
             valueName = UniqueName(table, snapshot.Value.Column.Length == 0 ? "Conteo" : snapshot.Value.Label);
@@ -70,13 +84,14 @@ public static class PivotEngine
 
         if (outline)
         {
-            EmitOutline(table, snapshot, snapshot.Leaves, 0, "", expanded, crossNames, totalName, valueName);
+            EmitOutline(table, snapshot, snapshot.Leaves, 0, "", expanded, crossNames, valueNames, totalName, valueName);
         }
         else
         {
-            EmitFlat(table, snapshot, crossNames, totalName, valueName);
+            EmitFlat(table, snapshot, crossNames, valueNames, totalName, valueName);
         }
 
+        AppendGrandTotal(table, snapshot, crossNames, valueNames, totalName, valueName);
         return table;
     }
 
@@ -86,6 +101,13 @@ public static class PivotEngine
         var value = config.Values.Count > 0
             ? config.Values[0]
             : new PivotValueField { Column = config.Rows.FirstOrDefault()?.Column ?? "", Operation = PivotOp.Count };
+
+        // Múltiples valores: solo cuando NO hay cruce de columnas (como Excel,
+        // varias columnas de valor lado a lado). Con cruce se usa el primero.
+        var valueFields = config.Values.Count > 0
+            ? config.Values.ToList()
+            : new List<PivotValueField> { value };
+        var multiValues = !hasCross && valueFields.Count > 1;
 
         var yearFlags = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         bool IncludeYear(string column)
@@ -138,13 +160,31 @@ public static class PivotEngine
                 groups[rowKey] = leaf;
             }
 
-            if (!leaf.Cols.TryGetValue(colKey, out var agg))
+            if (multiValues)
             {
-                agg = new PivotAgg();
-                leaf.Cols[colKey] = agg;
-            }
+                // Una entrada de agregación por cada campo de valor: clave "v0","v1"...
+                for (var vi = 0; vi < valueFields.Count; vi++)
+                {
+                    var vkey = "v" + vi.ToString(CultureInfo.InvariantCulture);
+                    if (!leaf.Cols.TryGetValue(vkey, out var vagg))
+                    {
+                        vagg = new PivotAgg();
+                        leaf.Cols[vkey] = vagg;
+                    }
 
-            Add(agg, row, value);
+                    Add(vagg, row, valueFields[vi]);
+                }
+            }
+            else
+            {
+                if (!leaf.Cols.TryGetValue(colKey, out var agg))
+                {
+                    agg = new PivotAgg();
+                    leaf.Cols[colKey] = agg;
+                }
+
+                Add(agg, row, value);
+            }
         }
 
         var cross = colValues
@@ -159,6 +199,7 @@ public static class PivotEngine
             Cross = cross,
             CrossSort = colValues,
             Value = value,
+            Values = multiValues ? valueFields : new List<PivotValueField> { value },
             RowFields = config.Rows.ToList(),
             Outline = config.Rows.Count > 1,
         };
@@ -168,6 +209,7 @@ public static class PivotEngine
         DataTable table,
         PivotSnapshot snapshot,
         Dictionary<string, string> crossNames,
+        Dictionary<string, string> valueNames,
         string? totalName,
         string? valueName)
     {
@@ -185,9 +227,53 @@ public static class PivotEngine
                 dataRow[i] = i < leaf.Labels.Length ? leaf.Labels[i] : "";
             }
 
-            WriteValues(dataRow, MergeCols(new[] { leaf }), snapshot, crossNames, totalName, valueName);
+            WriteValues(dataRow, MergeCols(new[] { leaf }), snapshot, crossNames, valueNames, totalName, valueName);
             table.Rows.Add(dataRow);
         }
+    }
+
+    /// <summary>
+    /// Agrega la fila de Gran Total al final: agrega todas las hojas y escribe
+    /// los mismos valores/columnas que una fila normal. Etiqueta "Gran total".
+    /// </summary>
+    private static void AppendGrandTotal(
+        DataTable table,
+        PivotSnapshot snapshot,
+        Dictionary<string, string> crossNames,
+        Dictionary<string, string> valueNames,
+        string? totalName,
+        string? valueName)
+    {
+        // Sin filas (0 o 1 grupo) el gran total sería idéntico a la única fila:
+        // no aporta y se omite, igual que Excel.
+        if (snapshot.Leaves.Count <= 1)
+        {
+            return;
+        }
+
+        var row = table.NewRow();
+        // Etiqueta "Gran total" solo en una columna de TEXTO. Si el pivote no
+        // tiene columnas de etiqueta (p.ej. solo Valores), se omite la etiqueta
+        // pero igual se escriben los totales (evita el error de tipo Double).
+        if (snapshot.Outline)
+        {
+            row[OutlineColumn] = "Gran total";
+            row[PathColumn] = "";
+            row[KidsColumn] = false;
+        }
+        else
+        {
+            var labelCol = table.Columns.Cast<DataColumn>()
+                .FirstOrDefault(c => c.DataType == typeof(string)
+                                     && !c.ColumnName.StartsWith("_pivot", StringComparison.Ordinal));
+            if (labelCol is not null)
+            {
+                row[labelCol] = "Gran total";
+            }
+        }
+
+        WriteValues(row, MergeCols(snapshot.Leaves), snapshot, crossNames, valueNames, totalName, valueName);
+        table.Rows.Add(row);
     }
 
     private static void EmitOutline(
@@ -198,6 +284,7 @@ public static class PivotEngine
         string parentPath,
         ISet<string> expanded,
         Dictionary<string, string> crossNames,
+        Dictionary<string, string> valueNames,
         string? totalName,
         string? valueName)
     {
@@ -221,12 +308,12 @@ public static class PivotEngine
             dataRow[OutlineColumn] = indent + glyph + label;
             dataRow[PathColumn] = path;
             dataRow[KidsColumn] = hasKids;
-            WriteValues(dataRow, MergeCols(group), snapshot, crossNames, totalName, valueName);
+            WriteValues(dataRow, MergeCols(group), snapshot, crossNames, valueNames, totalName, valueName);
             table.Rows.Add(dataRow);
 
             if (isOpen)
             {
-                EmitOutline(table, snapshot, group, level + 1, path, expanded, crossNames, totalName, valueName);
+                EmitOutline(table, snapshot, group, level + 1, path, expanded, crossNames, valueNames, totalName, valueName);
             }
         }
     }
@@ -283,6 +370,7 @@ public static class PivotEngine
         Dictionary<string, PivotAgg> cols,
         PivotSnapshot snapshot,
         Dictionary<string, string> crossNames,
+        Dictionary<string, string> valueNames,
         string? totalName,
         string? valueName)
     {
@@ -297,6 +385,24 @@ public static class PivotEngine
             }
 
             dataRow[totalName!] = total;
+            return;
+        }
+
+        // Múltiples valores (sin cruce): una columna por cada campo de valor.
+        if (valueNames.Count > 0)
+        {
+            for (var vi = 0; vi < snapshot.Values.Count; vi++)
+            {
+                var vkey = "v" + vi.ToString(CultureInfo.InvariantCulture);
+                if (!valueNames.TryGetValue(vkey, out var colName))
+                {
+                    continue;
+                }
+
+                var agg = cols.TryGetValue(vkey, out var a) ? a : null;
+                dataRow[colName] = Finish(agg, snapshot.Values[vi].Operation);
+            }
+
             return;
         }
 
@@ -394,7 +500,13 @@ public static class PivotEngine
             return new AxisText(DateGroup.SortKey(dt, group), DateGroup.Format(dt, group, year));
         }
 
-        if (field.Group != DateGroupLevel.None)
+        // Si el campo pide agrupación de fecha pero el valor NO es fecha, solo
+        // colapsamos a "(vacío)" cuando la columna EXISTE (valor null/ilegible).
+        // Si la columna ya no existe (p.ej. tras renombrar), no forzamos el
+        // colapso: usamos el texto crudo para no romper toda la agrupación.
+        var columnExists = !string.IsNullOrEmpty(field.Column)
+                           && row.Row.Table.Columns.Contains(field.Column);
+        if (field.Group != DateGroupLevel.None && columnExists)
         {
             return new AxisText("~", "(vacío)");
         }

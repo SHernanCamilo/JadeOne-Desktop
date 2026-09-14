@@ -71,20 +71,49 @@ public partial class PivotPanel : UserControl
 
         foreach (var field in _allFields)
         {
-            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (DataRowView row in view)
-            {
-                set.Add(PivotEngine.FormatCell(row, field.Name));
-                if (set.Count >= 200)
-                {
-                    break;
-                }
-            }
-
-            var list = new List<string> { "(Todos)" };
-            list.AddRange(set.OrderBy(s => s, StringComparer.CurrentCultureIgnoreCase));
-            _choices[field.Name] = list;
+            _choices[field.Name] = BuildChoices(field.Name);
         }
+    }
+
+    /// <summary>
+    /// Valores distintos de una columna para el desplegable del filtro.
+    /// Se calcula bajo demanda para que un campo recién movido a "Filtros"
+    /// (o uno renombrado) siempre tenga opciones reales y no quede solo en
+    /// "(Todos)" — que era la causa de que los filtros "no funcionaran".
+    /// </summary>
+    private List<string> BuildChoices(string column)
+    {
+        var list = new List<string> { "(Todos)" };
+        if (_view is null || string.IsNullOrEmpty(column) || _view.Table?.Columns.Contains(column) != true)
+        {
+            return list;
+        }
+
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (DataRowView row in _view)
+        {
+            set.Add(PivotEngine.FormatCell(row, column));
+            if (set.Count >= 500)
+            {
+                break;
+            }
+        }
+
+        list.AddRange(set.OrderBy(s => s, StringComparer.CurrentCultureIgnoreCase));
+        return list;
+    }
+
+    /// <summary>Opciones cacheadas del campo; las calcula al vuelo si faltan.</summary>
+    private List<string> ChoicesFor(string column)
+    {
+        if (_choices.TryGetValue(column, out var cached) && cached.Count > 1)
+        {
+            return cached;
+        }
+
+        var fresh = BuildChoices(column);
+        _choices[column] = fresh;
+        return fresh;
     }
 
     private void OnSearch(object sender, TextChangedEventArgs e)
@@ -383,7 +412,7 @@ public partial class PivotPanel : UserControl
         }
 
         if (Config.FilterSelections.TryGetValue(item.Column, out var current)
-            && string.Equals(current, next, StringComparison.Ordinal))
+            && string.Equals(current, next, StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
@@ -441,7 +470,7 @@ public partial class PivotPanel : UserControl
         _syncing = true;
         FilterChips.ItemsSource = Config.Filters.Select((n, i) => new ChipItem(n, i, "filters")
         {
-            Choices = _choices.TryGetValue(n, out var c) ? c : new List<string> { "(Todos)" },
+            Choices = ChoicesFor(n),
             SelectedFilter = Config.FilterSelections.TryGetValue(n, out var sel) ? sel : "(Todos)",
         }).ToList();
         ColumnChips.ItemsSource = Config.Columns.Select((f, i) => new ChipItem(f.Column, i, "columns", group: f.Group)).ToList();

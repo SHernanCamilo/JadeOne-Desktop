@@ -8,9 +8,24 @@ namespace SaraBI.Services;
 
 public static class ExcelExporter
 {
+    /// <summary>
+    /// Escribe el DataTable a .xlsx. MiniExcel ya trabaja en streaming (fila a
+    /// fila, RAM constante). Para acelerar la escritura a disco usamos un
+    /// FileStream propio con buffer grande (1 MB) en vez de dejar que la
+    /// librería abra el archivo con el buffer por defecto: en tablas de cientos
+    /// de miles de filas esto reduce notablemente el tiempo de I/O.
+    /// </summary>
     public static void Save(DataTable table, string path)
     {
-        MiniExcel.SaveAs(path, table, overwriteFile: true);
+        using var fs = new FileStream(
+            path,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None,
+            bufferSize: 1024 * 1024,
+            FileOptions.SequentialScan);
+
+        fs.SaveAs(table, printHeader: true, excelType: ExcelType.XLSX);
     }
 
     public static void SaveCsv(DataTable table, string path)

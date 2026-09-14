@@ -8,6 +8,10 @@ public sealed class PivotSnapshot
     public List<string> Cross { get; init; } = new();
     public Dictionary<string, string> CrossSort { get; init; } = new(StringComparer.Ordinal);
     public PivotValueField Value { get; init; } = new();
+
+    /// <summary>Todos los campos de Valores (para múltiples columnas de valor sin cruce).</summary>
+    public IReadOnlyList<PivotValueField> Values { get; init; } = Array.Empty<PivotValueField>();
+
     public IReadOnlyList<PivotAxisField> RowFields { get; init; } = Array.Empty<PivotAxisField>();
     public bool Outline { get; init; }
     public int LeafCount => Leaves.Count;

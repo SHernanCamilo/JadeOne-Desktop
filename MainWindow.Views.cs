@@ -1,14 +1,45 @@
 using System.ComponentModel;
 using System.Data;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
-using Microsoft.Win32;
+using System.Windows.Input;
+using SaraBI.Dialogs;
 using SaraBI.Models;
 using SaraBI.Services;
 
 namespace SaraBI;
+
+/// <summary>
+/// Item de la barra de filtros de página de la tabla dinámica (encima de la
+/// tabla, como Excel). Column = campo; Choices = valores; Selected = valor activo.
+/// </summary>
+public sealed class PivotPageFilterItem : INotifyPropertyChanged
+{
+    private string _selected = "(Todos)";
+
+    public string Column { get; init; } = "";
+    public List<string> Choices { get; init; } = new() { "(Todos)" };
+
+    public string Selected
+    {
+        get => _selected;
+        set
+        {
+            if (_selected == value)
+            {
+                return;
+            }
+
+            _selected = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Selected)));
+        }
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+}
 
 public sealed class ColumnVisibilityItem : INotifyPropertyChanged
 {
@@ -163,6 +194,209 @@ public partial class MainWindow
         }
     }
 
+    /// <summary>
+    /// Rellena la barra de filtros de página (encima de la tabla) con los campos
+    /// de la zona "Filtros" del pivote activo. Se llama al activar la hoja y al
+    /// reconstruir. En Excel esta barra es la forma principal de filtrar.
+    /// </summary>
+    private void RefreshPivotFilterBar()
+    {
+        if (PivotFilterBar is null || PivotFilterItems is null)
+        {
+            return;
+        }
+
+        if (_activeSheet is not { IsPivot: true } sheet || sheet.Config.Filters.Count == 0)
+        {
+            PivotFilterBar.Visibility = Visibility.Collapsed;
+            PivotFilterItems.ItemsSource = null;
+            return;
+        }
+
+        var sourceView = ResolvePivotSource(sheet);
+        var items = new List<PivotPageFilterItem>();
+        foreach (var col in sheet.Config.Filters)
+        {
+            var choices = new List<string> { "(Todos)" };
+            if (sourceView?.Table?.Columns.Contains(col) == true)
+            {
+                var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (DataRowView row in sourceView)
+                {
+                    set.Add(PivotEngine.FormatCell(row, col));
+                    if (set.Count >= 500)
+                    {
+                        break;
+                    }
+                }
+
+                choices.AddRange(set.OrderBy(s => s, StringComparer.CurrentCultureIgnoreCase));
+            }
+
+            var selected = sheet.Config.FilterSelections.TryGetValue(col, out var sel)
+                           && !string.IsNullOrWhiteSpace(sel)
+                ? sel
+                : "(Todos)";
+
+            items.Add(new PivotPageFilterItem
+            {
+                Column = col,
+                Choices = choices,
+                Selected = choices.Contains(selected) ? selected : "(Todos)",
+            });
+        }
+
+        PivotFilterItems.ItemsSource = items;
+        PivotFilterBar.Visibility = Visibility.Visible;
+    }
+
+    private void OnPivotPageFilterChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not ComboBox { Tag: PivotPageFilterItem item }
+            || _activeSheet is not { IsPivot: true } sheet)
+        {
+            return;
+        }
+
+        var current = sheet.Config.FilterSelections.TryGetValue(item.Column, out var cur) ? cur : "(Todos)";
+        if (string.Equals(current, item.Selected, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        sheet.Config.FilterSelections[item.Column] = item.Selected;
+        // Mantener el panel lateral en sincronía y reconstruir.
+        PivotSidebar.AttachConfig(sheet.Config);
+        RebuildPivot();
+        ScheduleSavePivots();
+    }
+
+    /// <summary>
+    /// Crea una hoja en blanco editable (tipo Excel) y la activa. Se puede
+    /// escribir, copiar y pegar libremente.
+    /// </summary>
+    /// <summary>Abre el menú del botón + para elegir tipo de hoja nueva.</summary>
+    private void OnNewSheetMenu(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { ContextMenu: { } menu } btn)
+        {
+            menu.PlacementTarget = btn;
+            menu.IsOpen = true;
+        }
+    }
+
+    private void OnNewBlankSheet(object sender, RoutedEventArgs e) => CreateBlankSheet();
+
+    private void CreateBlankSheet()
+    {
+        var n = _sheets.Count(s => s.IsBlank) + 1;
+        var table = new DataTable("Hoja");
+        // Hoja en blanco con 10 columnas (A..J) y 100 filas vacías para empezar.
+        for (var c = 0; c < 10; c++)
+        {
+            table.Columns.Add(ColumnLetter(c), typeof(string));
+        }
+
+        for (var r = 0; r < 100; r++)
+        {
+            table.Rows.Add(table.NewRow());
+        }
+
+        var sheet = new WorkbookSheet
+        {
+            Name = n == 1 ? "Hoja en blanco" : $"Hoja en blanco {n}",
+            IsBlank = true,
+            SourceTable = table,
+        };
+        _sheets.Add(sheet);
+        RefreshSheetTabs();
+        ActivateSheet(sheet, capture: true);
+        StatusText.Text = "Hoja en blanco. Escriba, copie y pegue como en Excel.";
+    }
+
+    private static string ColumnLetter(int index)
+    {
+        var n = index + 1;
+        var s = "";
+        while (n > 0)
+        {
+            var m = (n - 1) % 26;
+            s = (char)('A' + m) + s;
+            n = (n - 1) / 26;
+        }
+
+        return s;
+    }
+
+    /// <summary>
+    /// Abre el diálogo de columna calculada y, si el usuario confirma, agrega la
+    /// columna al DataTable de la hoja de datos activa aplicando la fórmula.
+    /// </summary>
+    private void OnAddCalcColumn(object sender, RoutedEventArgs e)
+    {
+        if (!RequireBrowserSession())
+        {
+            return;
+        }
+
+        if (IsPivotSheet)
+        {
+            MessageBox.Show(this,
+                "Las columnas calculadas se agregan sobre una hoja de datos, no sobre una tabla dinámica.",
+                "Columna calculada", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var table = BoundTable ?? _table;
+        if (table is null)
+        {
+            MessageBox.Show(this,
+                "Cargue primero una vista (Actualizar todo) para agregar una columna calculada.",
+                "Columna calculada", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        // Resolver de hojas para BUSCARV entre vistas cargadas (por nombre de hoja).
+        DataTable? LookupResolver(string sheetName) =>
+            _sheets.FirstOrDefault(s =>
+                !s.IsPivot
+                && s.SourceTable is not null
+                && (string.Equals(s.Name, sheetName, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(s.ViewName, sheetName, StringComparison.OrdinalIgnoreCase)))?.SourceTable;
+
+        var engine = new FormulaEngine(LookupResolver);
+        var columns = table.Columns.Cast<DataColumn>()
+            .Select(c => c.ColumnName)
+            .Where(n => !PivotEngine.IsHiddenColumn(n))
+            .ToList();
+
+        var dialog = new CalcColumnDialog(columns, engine) { Owner = this };
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        Mouse.OverrideCursor = Cursors.Wait;
+        try
+        {
+            Grid.ItemsSource = null;
+            engine.AddCalculatedColumn(table, dialog.ColumnName, dialog.Formula);
+            RebindGrid(dialog.ColumnName);
+            RefreshPivotFieldList();
+            StatusText.Text = $"Columna calculada «{dialog.ColumnName}» agregada.";
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("Columna calculada falló", ex);
+            MessageBox.Show(this, ex.Message, "Columna calculada", MessageBoxButton.OK, MessageBoxImage.Error);
+            RebindGrid(null);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+        }
+    }
+
     private void OnAddViewClosed(object? sender, EventArgs e) =>
         AddViewSidebar.Visibility = Visibility.Collapsed;
 
@@ -213,17 +447,13 @@ public partial class MainWindow
             return;
         }
 
-        var name = SanitizeFile(_activeSheet?.Name ?? _session?.View ?? "vista");
-        var dialog = new SaveFileDialog
-        {
-            Filter = "Excel (*.xlsx)|*.xlsx",
-            FileName = $"{name}_{DateTime.Now:yyyyMMdd}.xlsx",
-            OverwritePrompt = true,
-        };
-        if (dialog.ShowDialog(this) != true)
-        {
-            return;
-        }
+        // Descarga estilo navegador: sin diálogo "Guardar como".
+        // El archivo se genera directo en la carpeta Descargas del usuario,
+        // con un nombre único (igual que hace un navegador), y al terminar se
+        // avisa con opción de abrirlo.
+        var baseName = SanitizeFile(_activeSheet?.Name ?? _session?.View ?? "vista");
+        var fileName = $"{baseName}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+        var targetPath = UniqueDownloadPath(fileName);
 
         try
         {
@@ -236,20 +466,38 @@ public partial class MainWindow
                     return;
                 }
 
-                ExcelExporter.Save(CloneVisible(_activeSheet.Result), dialog.FileName);
-                StatusText.Text = "Tabla dinámica exportada";
+                ShowOverlay("Generando Excel...", "Preparando la tabla dinámica", true);
+                var pivot = CloneVisible(_activeSheet.Result);
+                await Task.Run(() => ExcelExporter.Save(pivot, targetPath));
+                HideOverlay();
+                NotifyDownloadReady(targetPath);
                 return;
             }
 
+            // PRIORIDAD: si ya hay datos cargados en pantalla, generamos el Excel
+            // LOCAL (rápido, ~2s para 400k filas) y además respeta los filtros y
+            // las columnas visibles/orden que el usuario ve. Solo usamos el
+            // archivo del servidor como respaldo cuando no hay datos locales.
+            var table = BuildExportTable();
+            if (table is not null && table.Rows.Count > 0)
+            {
+                ShowOverlay("Generando Excel...", $"Escribiendo {table.Rows.Count:N0} filas", true);
+                await Task.Run(() => ExcelExporter.Save(table, targetPath));
+                HideOverlay();
+                NotifyDownloadReady(targetPath);
+                return;
+            }
+
+            // Respaldo: descargar el archivo generado en el servidor.
             var jobId = _activeSheet?.LastJobId;
             if (!string.IsNullOrWhiteSpace(jobId))
             {
                 ShowOverlay("Descargando Excel...", "Obteniendo el archivo generado en el servidor", true);
                 try
                 {
-                    await _api.DownloadExcelFileAsync(jobId, dialog.FileName, CancellationToken.None);
+                    await _api.DownloadExcelFileAsync(jobId, targetPath, CancellationToken.None);
                     HideOverlay();
-                    StatusText.Text = "Excel descargado";
+                    NotifyDownloadReady(targetPath);
                     return;
                 }
                 catch (Exception ex)
@@ -259,7 +507,6 @@ public partial class MainWindow
                 }
             }
 
-            var table = _view?.ToTable() ?? _table;
             if (table is null)
             {
                 MessageBox.Show(this,
@@ -268,16 +515,160 @@ public partial class MainWindow
                 return;
             }
 
-            ShowOverlay("Generando Excel...", "Escribiendo el archivo local", true);
-            await Task.Run(() => ExcelExporter.Save(table, dialog.FileName));
+            // Última opción: exportar aunque esté vacío (encabezados).
+            ShowOverlay("Generando Excel...", $"Escribiendo {table.Rows.Count:N0} filas", true);
+            await Task.Run(() => ExcelExporter.Save(table, targetPath));
             HideOverlay();
-            StatusText.Text = "Excel generado";
+            NotifyDownloadReady(targetPath);
         }
         catch (Exception ex)
         {
             HideOverlay();
             MessageBox.Show(this, ex.Message, "Descargar Excel", MessageBoxButton.OK, MessageBoxImage.Error);
         }
+    }
+
+    /// <summary>
+    /// Carpeta Descargas del usuario. Usa la conocida "Downloads" de Windows y,
+    /// si no está disponible, cae a Perfil\Downloads o al escritorio.
+    /// </summary>
+    private static string DownloadsFolder()
+    {
+        try
+        {
+            var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var downloads = Path.Combine(profile, "Downloads");
+            if (Directory.Exists(downloads))
+            {
+                return downloads;
+            }
+
+            Directory.CreateDirectory(downloads);
+            return downloads;
+        }
+        catch
+        {
+            return Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        }
+    }
+
+    /// <summary>
+    /// Devuelve una ruta libre en Descargas. Si el archivo ya existe agrega
+    /// " (2)", " (3)"... igual que un navegador, para no sobrescribir.
+    /// </summary>
+    private static string UniqueDownloadPath(string fileName)
+    {
+        var folder = DownloadsFolder();
+        var name = Path.GetFileNameWithoutExtension(fileName);
+        var ext = Path.GetExtension(fileName);
+        var candidate = Path.Combine(folder, fileName);
+        var i = 2;
+        while (File.Exists(candidate))
+        {
+            candidate = Path.Combine(folder, $"{name} ({i++}){ext}");
+        }
+
+        return candidate;
+    }
+
+    /// <summary>
+    /// Aviso no bloqueante estilo navegador: informa en la barra de estado y
+    /// ofrece abrir el archivo descargado.
+    /// </summary>
+    private void NotifyDownloadReady(string path)
+    {
+        var fileName = Path.GetFileName(path);
+        StatusText.Text = $"Descargado: {fileName}";
+        AppLog.Info($"Excel descargado en {path}");
+
+        var choice = MessageBox.Show(
+            this,
+            $"La descarga terminó.\n\n{fileName}\nse guardó en la carpeta Descargas.\n\n¿Desea abrirlo ahora?",
+            "Descarga completada",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Information);
+
+        if (choice != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"No se pudo abrir el Excel descargado: {ex.Message}");
+            // Como plan B, abrir la carpeta Descargas y seleccionar el archivo.
+            try
+            {
+                Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"")
+                {
+                    UseShellExecute = true,
+                });
+            }
+            catch
+            {
+                // Sin acción: el archivo ya está en Descargas.
+            }
+        }
+    }
+
+    /// <summary>
+    /// Arma la tabla a exportar respetando lo que el usuario ve: solo las filas
+    /// filtradas (y en el orden actual del DataView), y solo las columnas
+    /// visibles del grid en su orden de pantalla, con sus encabezados.
+    /// </summary>
+    private DataTable? BuildExportTable()
+    {
+        if (_view is null || _table is null)
+        {
+            return _view?.ToTable() ?? _table;
+        }
+
+        // Columnas visibles del grid, en orden de pantalla (DisplayIndex).
+        var gridCols = Grid.Columns
+            .Where(c => c.Visibility == Visibility.Visible)
+            .OrderBy(c => c.DisplayIndex)
+            .Select(c => ColumnKey(c))
+            .Where(n => !string.IsNullOrEmpty(n) && _table.Columns.Contains(n))
+            .Cast<string>()
+            .ToList();
+
+        // Si por algún motivo no hay columnas resueltas, caer al comportamiento previo.
+        if (gridCols.Count == 0)
+        {
+            return _view.ToTable();
+        }
+
+        var export = new DataTable("Datos");
+        foreach (var name in gridCols)
+        {
+            var src = _table.Columns[name]!;
+            export.Columns.Add(DisplayHeader(name), src.DataType);
+        }
+
+        export.BeginLoadData();
+        try
+        {
+            foreach (DataRowView drv in _view)
+            {
+                var row = export.NewRow();
+                for (var i = 0; i < gridCols.Count; i++)
+                {
+                    row[i] = drv[gridCols[i]];
+                }
+
+                export.Rows.Add(row);
+            }
+        }
+        finally
+        {
+            export.EndLoadData();
+        }
+
+        return export;
     }
 
     private static DataTable CloneVisible(DataTable source)

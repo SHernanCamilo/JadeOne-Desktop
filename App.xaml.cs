@@ -32,11 +32,35 @@ public partial class App : Application
         var protocolUrl = args.FirstOrDefault(a =>
             a.StartsWith(ProtocolHandler.Scheme + ":", StringComparison.OrdinalIgnoreCase));
 
+        // Instancia única: si ya hay una abierta, reenviarle la URL y salir.
+        if (!SingleInstance.TryBecomePrimary())
+        {
+            SingleInstance.SendToPrimary(protocolUrl);
+            AppLog.Info("Ya había una instancia abierta; URL reenviada. Cerrando esta.");
+            Shutdown();
+            return;
+        }
+
         try
         {
             var window = new MainWindow(protocolUrl);
             MainWindow = window;
             window.Show();
+
+            // Escuchar nuevas invocaciones (otros clics desde la web) y
+            // enrutarlas a la ventana existente en el hilo UI.
+            SingleInstance.StartServer(url =>
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    if (MainWindow is MainWindow mw)
+                    {
+                        mw.HandleIncomingProtocol(url);
+                    }
+                });
+            });
+
+            Exit += (_, _) => SingleInstance.Release();
         }
         catch (Exception ex)
         {

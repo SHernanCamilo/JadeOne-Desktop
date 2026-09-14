@@ -13,7 +13,7 @@
         FontFamily="Segoe UI"
         FontSize="12"
         Background="White"
-        BorderBrush="#8A8A8A"
+        BorderBrush="#217346"
         BorderThickness="1"
         SnapsToDevicePixels="True"
         UseLayoutRounding="True"
@@ -163,6 +163,12 @@
             <Separator/>
             <MenuItem Header="Contiene..." Tag="Contains" Click="OnTextOperator"/>
             <MenuItem Header="No contiene..." Tag="NotContains" Click="OnTextOperator"/>
+            <Separator/>
+            <MenuItem Header="Mayor que..." Tag="GreaterThan" Click="OnTextOperator"/>
+            <MenuItem Header="Mayor o igual que..." Tag="GreaterOrEqual" Click="OnTextOperator"/>
+            <MenuItem Header="Menor que..." Tag="LessThan" Click="OnTextOperator"/>
+            <MenuItem Header="Menor o igual que..." Tag="LessOrEqual" Click="OnTextOperator"/>
+            <MenuItem Header="Entre..." Tag="Between" Click="OnTextOperator"/>
           </ContextMenu>
         </Button.ContextMenu>
         <DockPanel>
@@ -185,6 +191,10 @@
                        Text="Contiene"/>
             <TextBox x:Name="TextValueBox" Height="22" Padding="4,2" Margin="0,3,0,0"
                      TextChanged="OnTextValueChanged"/>
+            <TextBlock x:Name="TextValue2Label" FontSize="11" Foreground="#616161"
+                       Text="y" Margin="0,4,0,0" Visibility="Collapsed"/>
+            <TextBox x:Name="TextValueBox2" Height="22" Padding="4,2" Margin="0,3,0,0"
+                     Visibility="Collapsed" TextChanged="OnTextValueChanged"/>
           </StackPanel>
         </DockPanel>
       </Border>

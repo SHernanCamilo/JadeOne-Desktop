@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:primitives="clr-namespace:System.Windows.Controls.Primitives;assembly=PresentationFramework"
         xmlns:controls="clr-namespace:SaraBI.Controls"
+        xmlns:iconPacks="http://metro.mahapps.com/winfx/xaml/iconpacks"
         Title="JadeOne Desktop"
         Icon="pack://application:,,,/Assets/jadeone.png"
         Height="760" Width="1360"
@@ -43,7 +44,7 @@
         </Button>
         <TextBlock Text="{Binding}" TextTrimming="CharacterEllipsis"
                    VerticalAlignment="Center" Margin="2,0,0,0"
-                   FontWeight="SemiBold" FontFamily="Calibri" FontSize="12"
+                   FontWeight="SemiBold" FontFamily="Segoe UI" FontSize="12"
                    Foreground="#1A5C38"/>
       </DockPanel>
     </DataTemplate>
@@ -71,6 +72,9 @@
           </Border>
         </StackPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+          <Button x:Name="DownloadButton" Content="⬇  Descargar Excel" Style="{StaticResource XlCtaBtn}"
+                  Click="OnExportExcel" Margin="0,0,8,0"
+                  ToolTip="Descarga la información de la vista a la carpeta Descargas"/>
           <Button x:Name="RefreshButton" Content="Actualizar todo" Style="{StaticResource XlTitleBtn}"
                   Click="OnRefresh" IsEnabled="False"/>
         </StackPanel>
@@ -93,20 +97,23 @@
 
     <!-- Ribbon body -->
     <Border DockPanel.Dock="Top" Background="#F5F5F5" Height="78" BorderBrush="#D4D4D4" BorderThickness="0,0,0,1">
+      <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
       <Grid>
         <StackPanel x:Name="RibbonDatos" Orientation="Horizontal">
           <StackPanel Style="{x:Null}" Margin="8,4,8,2">
             <StackPanel Orientation="Horizontal">
               <Button Style="{StaticResource XlRibbonBtn}" Click="OnRefresh">
                 <StackPanel>
-                  <TextBlock Text="↻" FontSize="16" Foreground="#217346" HorizontalAlignment="Center"/>
-                  <TextBlock Text="Actualizar&#x0a;todo" TextAlignment="Center"/>
+                  <iconPacks:PackIconMaterial Kind="Refresh" Width="18" Height="18"
+                                              Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Actualizar&#x0a;todo" TextAlignment="Center" Margin="0,3,0,0"/>
                 </StackPanel>
               </Button>
               <Button x:Name="CancelButton" Style="{StaticResource XlRibbonBtn}" Click="OnCancel" IsEnabled="False">
                 <StackPanel>
-                  <TextBlock Text="■" FontSize="12" Foreground="#C0392B" HorizontalAlignment="Center"/>
-                  <TextBlock Text="Cancelar" TextAlignment="Center"/>
+                  <iconPacks:PackIconMaterial Kind="StopCircleOutline" Width="16" Height="16"
+                                              Foreground="#C0392B" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Cancelar" TextAlignment="Center" Margin="0,3,0,0"/>
                 </StackPanel>
               </Button>
             </StackPanel>
@@ -116,8 +123,9 @@
           <StackPanel Margin="8,4,8,2">
             <Button Style="{StaticResource XlRibbonBtn}" Click="OnAddView">
               <StackPanel>
-                <TextBlock Text="＋" FontSize="16" Foreground="#217346" HorizontalAlignment="Center"/>
-                <TextBlock Text="Agregar&#x0a;vista" TextAlignment="Center"/>
+                <iconPacks:PackIconMaterial Kind="TablePlus" Width="18" Height="18"
+                                            Foreground="#217346" HorizontalAlignment="Center"/>
+                <TextBlock Text="Agregar&#x0a;vista" TextAlignment="Center" Margin="0,3,0,0"/>
               </StackPanel>
             </Button>
             <TextBlock Text="Vistas" FontSize="10.5" Foreground="#757575" HorizontalAlignment="Center"/>
@@ -133,26 +141,30 @@
               </Button>
               <Button Style="{StaticResource XlRibbonBtn}" Click="OnFormatPercent" ToolTip="Porcentaje">
                 <StackPanel>
-                  <TextBlock Text="%" FontSize="16" FontWeight="SemiBold" Foreground="#217346" HorizontalAlignment="Center"/>
-                  <TextBlock Text="Porcentaje" TextAlignment="Center"/>
+                  <iconPacks:PackIconMaterial Kind="Percent" Width="16" Height="16"
+                                              Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Porcentaje" TextAlignment="Center" Margin="0,3,0,0"/>
                 </StackPanel>
               </Button>
               <Button Style="{StaticResource XlRibbonBtn}" Click="OnFormatNumber" ToolTip="Separador de miles y 2 decimales">
                 <StackPanel>
-                  <TextBlock Text="1,2" FontSize="13" FontWeight="SemiBold" Foreground="#217346" HorizontalAlignment="Center"/>
-                  <TextBlock Text="Miles" TextAlignment="Center"/>
+                  <iconPacks:PackIconMaterial Kind="Numeric" Width="16" Height="16"
+                                              Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Miles" TextAlignment="Center" Margin="0,3,0,0"/>
                 </StackPanel>
               </Button>
               <Button Style="{StaticResource XlRibbonBtn}" Click="OnFormatInteger" ToolTip="Sin decimales">
                 <StackPanel>
-                  <TextBlock Text="#" FontSize="16" FontWeight="SemiBold" Foreground="#217346" HorizontalAlignment="Center"/>
-                  <TextBlock Text="Entero" TextAlignment="Center"/>
+                  <iconPacks:PackIconMaterial Kind="Pound" Width="16" Height="16"
+                                              Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Entero" TextAlignment="Center" Margin="0,3,0,0"/>
                 </StackPanel>
               </Button>
               <Button Style="{StaticResource XlRibbonBtn}" Click="OnFormatDate" ToolTip="Fecha DD/MM/YYYY">
                 <StackPanel>
-                  <TextBlock Text="📅" FontSize="13" HorizontalAlignment="Center"/>
-                  <TextBlock Text="Fecha" TextAlignment="Center"/>
+                  <iconPacks:PackIconMaterial Kind="CalendarMonth" Width="16" Height="16"
+                                              Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Fecha" TextAlignment="Center" Margin="0,3,0,0"/>
                 </StackPanel>
               </Button>
             </StackPanel>
@@ -163,14 +175,16 @@
             <StackPanel Orientation="Horizontal">
               <Button Style="{StaticResource XlRibbonBtn}" Click="OnShowFiltersTab">
                 <StackPanel>
-                  <TextBlock Text="☰" FontSize="14" Foreground="#217346" HorizontalAlignment="Center"/>
-                  <TextBlock Text="Filtros&#x0a;dinámicos" TextAlignment="Center"/>
+                  <iconPacks:PackIconMaterial Kind="Filter" Width="16" Height="16"
+                                              Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Filtros&#x0a;dinámicos" TextAlignment="Center" Margin="0,3,0,0"/>
                 </StackPanel>
               </Button>
               <Button Style="{StaticResource XlRibbonBtn}" Click="OnClearFilters">
                 <StackPanel>
-                  <TextBlock Text="✕" FontSize="14" Foreground="#217346" HorizontalAlignment="Center"/>
-                  <TextBlock Text="Limpiar&#x0a;filtros" TextAlignment="Center"/>
+                  <iconPacks:PackIconMaterial Kind="FilterOff" Width="16" Height="16"
+                                              Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Limpiar&#x0a;filtros" TextAlignment="Center" Margin="0,3,0,0"/>
                 </StackPanel>
               </Button>
             </StackPanel>
@@ -182,22 +196,25 @@
               <Button Style="{StaticResource XlRibbonBtn}" Click="OnToggleTotals"
                       ToolTip="Mostrar u ocultar sumas de columnas numéricas">
                 <StackPanel>
-                  <TextBlock Text="Σ" FontSize="16" FontWeight="SemiBold" Foreground="#217346" HorizontalAlignment="Center"/>
-                  <TextBlock Text="Fila de&#x0a;totales" TextAlignment="Center"/>
+                  <iconPacks:PackIconMaterial Kind="Sigma" Width="16" Height="16"
+                                              Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Fila de&#x0a;totales" TextAlignment="Center" Margin="0,3,0,0"/>
                 </StackPanel>
               </Button>
               <Button Style="{StaticResource XlRibbonBtn}" Click="OnFreezeColumns"
                       ToolTip="Congelar la primera columna de datos">
                 <StackPanel>
-                  <TextBlock Text="⊣" FontSize="16" Foreground="#217346" HorizontalAlignment="Center"/>
-                  <TextBlock Text="Congelar" TextAlignment="Center"/>
+                  <iconPacks:PackIconMaterial Kind="Snowflake" Width="16" Height="16"
+                                              Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Congelar" TextAlignment="Center" Margin="0,3,0,0"/>
                 </StackPanel>
               </Button>
               <Button Style="{StaticResource XlRibbonBtn}" Click="OnUnfreezeColumns"
                       ToolTip="Descongelar columnas">
                 <StackPanel>
-                  <TextBlock Text="⊢" FontSize="16" Foreground="#217346" HorizontalAlignment="Center"/>
-                  <TextBlock Text="Descongelar" TextAlignment="Center"/>
+                  <iconPacks:PackIconMaterial Kind="SnowflakeOff" Width="16" Height="16"
+                                              Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Descongelar" TextAlignment="Center" Margin="0,3,0,0"/>
                 </StackPanel>
               </Button>
             </StackPanel>
@@ -205,12 +222,28 @@
           </StackPanel>
           <Border Width="1" Background="#E0E0E0" Margin="0,8"/>
           <StackPanel Margin="8,4,8,2">
-            <Button Style="{StaticResource XlRibbonBtn}" Click="OnExportExcel"
-                    ToolTip="Descargar Excel con los datos de la hoja activa">
-              <StackPanel>
-                <TextBlock Text="⇩" FontSize="16" Foreground="#217346" HorizontalAlignment="Center"/>
-                <TextBlock Text="Descargar&#x0a;Excel" TextAlignment="Center"/>
-              </StackPanel>
+            <Button Click="OnExportExcel" Cursor="Hand" MinWidth="72" MinHeight="52"
+                    ToolTip="Genera un Excel con la información de la vista y lo descarga a la carpeta Descargas">
+              <Button.Template>
+                <ControlTemplate TargetType="Button">
+                  <Border x:Name="Bd" Background="#217346" CornerRadius="4" Padding="6,4">
+                    <StackPanel VerticalAlignment="Center">
+                      <iconPacks:PackIconMaterial Kind="MicrosoftExcel" Width="20" Height="20"
+                                                  Foreground="White" HorizontalAlignment="Center"/>
+                      <TextBlock Text="Descargar&#x0a;Excel" TextAlignment="Center" Margin="0,3,0,0"
+                                 Foreground="White" FontWeight="SemiBold" FontSize="10.5"/>
+                    </StackPanel>
+                  </Border>
+                  <ControlTemplate.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True">
+                      <Setter TargetName="Bd" Property="Background" Value="#1A5C38"/>
+                    </Trigger>
+                    <Trigger Property="IsPressed" Value="True">
+                      <Setter TargetName="Bd" Property="Background" Value="#154C2E"/>
+                    </Trigger>
+                  </ControlTemplate.Triggers>
+                </ControlTemplate>
+              </Button.Template>
             </Button>
             <TextBlock Text="Exportar" FontSize="10.5" Foreground="#757575" HorizontalAlignment="Center"/>
           </StackPanel>
@@ -218,7 +251,7 @@
           <StackPanel Margin="8,4,8,2">
             <Button Style="{StaticResource XlRibbonBtn}" Click="OnShowPivot">
               <StackPanel>
-                <TextBlock Text="▦" FontSize="16" Foreground="#217346" HorizontalAlignment="Center"/>
+                <iconPacks:PackIconMaterial Kind="TablePivot" Width="16" Height="16" Foreground="#217346" HorizontalAlignment="Center" Margin="0,0,0,3"/>
                 <TextBlock Text="Tabla&#x0a;dinámica" TextAlignment="Center"/>
               </StackPanel>
             </Button>
@@ -230,7 +263,7 @@
               <Button Style="{StaticResource XlRibbonBtn}" Click="OnRenameColumn"
                       ToolTip="Cambiar el nombre de la columna seleccionada (F2)">
                 <StackPanel>
-                  <TextBlock Text="A" FontSize="16" FontWeight="SemiBold" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <iconPacks:PackIconMaterial Kind="RenameBox" Width="16" Height="16" Foreground="#217346" HorizontalAlignment="Center" Margin="0,0,0,3"/>
                   <TextBlock Text="Nombre&#x0a;columna" TextAlignment="Center"/>
                 </StackPanel>
               </Button>
@@ -250,8 +283,15 @@
                   </ContextMenu>
                 </Button.ContextMenu>
                 <StackPanel>
-                  <TextBlock Text="123" FontSize="13" FontWeight="SemiBold" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <iconPacks:PackIconMaterial Kind="FormatListNumbered" Width="16" Height="16" Foreground="#217346" HorizontalAlignment="Center" Margin="0,0,0,3"/>
                   <TextBlock Text="Tipo de&#x0a;dato" TextAlignment="Center"/>
+                </StackPanel>
+              </Button>
+              <Button Style="{StaticResource XlRibbonBtn}" Click="OnAddCalcColumn"
+                      ToolTip="Agregar una columna nueva calculada con una fórmula (SUMAR, SI, BUSCARV, etc.)">
+                <StackPanel>
+                  <iconPacks:PackIconMaterial Kind="TableColumnPlusAfter" Width="16" Height="16" Foreground="#217346" HorizontalAlignment="Center" Margin="0,0,0,3"/>
+                  <TextBlock Text="Columna&#x0a;calculada" TextAlignment="Center"/>
                 </StackPanel>
               </Button>
             </StackPanel>
@@ -279,22 +319,22 @@
               <Button Style="{StaticResource XlRibbonBtn}" Click="OnAutoFit"
                       ToolTip="Ajustar el ancho de todas las columnas al contenido">
                 <StackPanel>
-                  <TextBlock Text="↔" FontSize="16" Foreground="#217346" HorizontalAlignment="Center"/>
-                  <TextBlock Text="Ajustar&#x0a;todo" TextAlignment="Center"/>
+                  <iconPacks:PackIconMaterial Kind="ArrowExpandHorizontal" Width="16" Height="16" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Ajustar&#x0a;todo" TextAlignment="Center" Margin="0,3,0,0"/>
                 </StackPanel>
               </Button>
               <Button Style="{StaticResource XlRibbonBtn}" Click="OnShowAllColumns"
                       ToolTip="Mostrar columnas ocultas">
                 <StackPanel>
-                  <TextBlock Text="◉" FontSize="14" Foreground="#217346" HorizontalAlignment="Center"/>
-                  <TextBlock Text="Mostrar&#x0a;todas" TextAlignment="Center"/>
+                  <iconPacks:PackIconMaterial Kind="EyeOutline" Width="16" Height="16" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Mostrar&#x0a;todas" TextAlignment="Center" Margin="0,3,0,0"/>
                 </StackPanel>
               </Button>
               <Button Style="{StaticResource XlRibbonBtn}" Click="OnShowColumnPanel"
                       ToolTip="Mostrar u ocultar columnas">
                 <StackPanel>
-                  <TextBlock Text="☰" FontSize="14" Foreground="#217346" HorizontalAlignment="Center"/>
-                  <TextBlock Text="Columnas" TextAlignment="Center"/>
+                  <iconPacks:PackIconMaterial Kind="ViewColumnOutline" Width="16" Height="16" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Columnas" TextAlignment="Center" Margin="0,3,0,0"/>
                 </StackPanel>
               </Button>
             </StackPanel>
@@ -320,21 +360,21 @@
             <StackPanel Orientation="Horizontal">
               <Button Style="{StaticResource XlRibbonBtn}" Click="OnShowPivot">
                 <StackPanel>
-                  <TextBlock Text="▦" FontSize="16" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <iconPacks:PackIconMaterial Kind="TablePivot" Width="16" Height="16" Foreground="#217346" HorizontalAlignment="Center" Margin="0,0,0,3"/>
                   <TextBlock Text="Tabla&#x0a;dinámica" TextAlignment="Center"/>
                 </StackPanel>
               </Button>
               <Button Style="{StaticResource XlRibbonBtn}" Click="OnClearPivot">
                 <StackPanel>
-                  <TextBlock Text="✕" FontSize="14" Foreground="#217346" HorizontalAlignment="Center"/>
-                  <TextBlock Text="Limpiar" TextAlignment="Center"/>
+                  <iconPacks:PackIconMaterial Kind="CloseCircleOutline" Width="16" Height="16" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Limpiar" TextAlignment="Center" Margin="0,3,0,0"/>
                 </StackPanel>
               </Button>
               <Button Style="{StaticResource XlRibbonBtn}" Click="OnExportExcel"
                       ToolTip="Exportar la tabla dinámica a Excel">
                 <StackPanel>
-                  <TextBlock Text="⇩" FontSize="16" Foreground="#217346" HorizontalAlignment="Center"/>
-                  <TextBlock Text="Exportar&#x0a;dinámica" TextAlignment="Center"/>
+                  <iconPacks:PackIconMaterial Kind="MicrosoftExcel" Width="16" Height="16" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Exportar&#x0a;dinámica" TextAlignment="Center" Margin="0,3,0,0"/>
                 </StackPanel>
               </Button>
             </StackPanel>
@@ -345,14 +385,14 @@
             <StackPanel Orientation="Horizontal">
               <Button Style="{StaticResource XlRibbonBtn}" Click="OnSavePivot" ToolTip="Guarda el diseño de la tabla dinámica en este equipo">
                 <StackPanel>
-                  <TextBlock Text="▣" FontSize="16" Foreground="#217346" HorizontalAlignment="Center"/>
-                  <TextBlock Text="Guardar" TextAlignment="Center"/>
+                  <iconPacks:PackIconMaterial Kind="ContentSaveOutline" Width="16" Height="16" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Guardar" TextAlignment="Center" Margin="0,3,0,0"/>
                 </StackPanel>
               </Button>
               <Button Style="{StaticResource XlRibbonBtn}" Click="OnOpenSavedPivot" ToolTip="Abre la tabla dinámica guardada de esta vista">
                 <StackPanel>
-                  <TextBlock Text="▢" FontSize="16" Foreground="#217346" HorizontalAlignment="Center"/>
-                  <TextBlock Text="Abrir&#x0a;guardada" TextAlignment="Center"/>
+                  <iconPacks:PackIconMaterial Kind="FolderOpenOutline" Width="16" Height="16" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Abrir&#x0a;guardada" TextAlignment="Center" Margin="0,3,0,0"/>
                 </StackPanel>
               </Button>
             </StackPanel>
@@ -364,7 +404,7 @@
               <Button Style="{StaticResource XlRibbonBtn}" Click="OnRenameColumn"
                       ToolTip="Cambiar el nombre de la columna seleccionada (F2)">
                 <StackPanel>
-                  <TextBlock Text="A" FontSize="16" FontWeight="SemiBold" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <iconPacks:PackIconMaterial Kind="RenameBox" Width="16" Height="16" Foreground="#217346" HorizontalAlignment="Center" Margin="0,0,0,3"/>
                   <TextBlock Text="Nombre&#x0a;columna" TextAlignment="Center"/>
                 </StackPanel>
               </Button>
@@ -384,7 +424,7 @@
                   </ContextMenu>
                 </Button.ContextMenu>
                 <StackPanel>
-                  <TextBlock Text="123" FontSize="13" FontWeight="SemiBold" Foreground="#217346" HorizontalAlignment="Center"/>
+                  <iconPacks:PackIconMaterial Kind="FormatListNumbered" Width="16" Height="16" Foreground="#217346" HorizontalAlignment="Center" Margin="0,0,0,3"/>
                   <TextBlock Text="Tipo de&#x0a;dato" TextAlignment="Center"/>
                 </StackPanel>
               </Button>
@@ -393,6 +433,7 @@
           </StackPanel>
         </StackPanel>
       </Grid>
+      </ScrollViewer>
     </Border>
 
     <!-- Formula bar -->
@@ -430,6 +471,8 @@
           <TextBlock x:Name="MetricsText" Text="— total   — mostrados   0 filtro(s)" Foreground="#EBFFFFFF" FontSize="11.5"/>
         </StackPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+          <TextBlock x:Name="SelectionSummaryText" Text="" Foreground="White" FontSize="11.5"
+                     FontWeight="SemiBold" Margin="0,0,14,0" VerticalAlignment="Center"/>
           <TextBlock x:Name="HintText" Text="1/1 vistas cargadas" Foreground="#CCFFFFFF" FontSize="11.5" Margin="0,0,10,0"/>
           <TextBlock x:Name="ZoomStatus" Text="100%" Foreground="White" FontSize="11.5"/>
         </StackPanel>
@@ -440,8 +483,15 @@
     <Border DockPanel.Dock="Bottom" Background="#F5F5F5" Height="26" BorderBrush="#D4D4D4" BorderThickness="0,1,0,0">
       <DockPanel>
         <Button DockPanel.Dock="Left" Content="＋" Width="26" Height="26" FontSize="14"
-                ToolTip="Nueva tabla dinámica" Background="Transparent" BorderThickness="0"
-                Cursor="Hand" Click="OnShowPivot" Foreground="#217346"/>
+                ToolTip="Nueva hoja" Background="Transparent" BorderThickness="0"
+                Cursor="Hand" Click="OnNewSheetMenu" Foreground="#217346">
+          <Button.ContextMenu>
+            <ContextMenu x:Name="NewSheetMenu">
+              <MenuItem Header="Hoja en blanco" Click="OnNewBlankSheet"/>
+              <MenuItem Header="Tabla dinámica" Click="OnShowPivot"/>
+            </ContextMenu>
+          </Button.ContextMenu>
+        </Button>
         <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
           <ItemsControl x:Name="SheetTabStrip">
             <ItemsControl.ItemsPanel>
@@ -556,8 +606,43 @@
       <Grid.LayoutTransform>
         <ScaleTransform x:Name="GridZoom" ScaleX="1" ScaleY="1"/>
       </Grid.LayoutTransform>
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="*"/>
+      </Grid.RowDefinitions>
 
-      <DataGrid x:Name="Grid"
+      <!-- Barra de filtros de página de la tabla dinámica (como Excel) -->
+      <Border x:Name="PivotFilterBar" Grid.Row="0" Visibility="Collapsed"
+              Background="#EAF2E5" BorderBrush="#A9D08E" BorderThickness="0,0,0,1" Padding="8,6">
+        <StackPanel Orientation="Horizontal">
+          <TextBlock Text="Filtros:" FontWeight="SemiBold" Foreground="#1A5C38"
+                     VerticalAlignment="Center" Margin="0,0,10,0" FontSize="12"/>
+          <ItemsControl x:Name="PivotFilterItems">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Orientation="Horizontal"/>
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Border Background="White" BorderBrush="#A9D08E" BorderThickness="1"
+                        CornerRadius="3" Margin="0,0,8,0" Padding="6,2">
+                  <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="{Binding Column}" FontWeight="SemiBold" Foreground="#1A5C38"
+                               VerticalAlignment="Center" Margin="0,0,6,0" FontSize="11.5"/>
+                    <ComboBox MinWidth="120" FontSize="11.5" VerticalContentAlignment="Center"
+                              ItemsSource="{Binding Choices}"
+                              SelectedItem="{Binding Selected, Mode=TwoWay}"
+                              Tag="{Binding}" SelectionChanged="OnPivotPageFilterChanged"/>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+
+      <DataGrid x:Name="Grid" Grid.Row="1"
                 AutoGenerateColumns="True"
                 IsReadOnly="True"
                 CanUserAddRows="False"
@@ -571,11 +656,13 @@
                 VirtualizingPanel.ScrollUnit="Pixel"
                 HeadersVisibility="All"
                 GridLinesVisibility="All"
-                HorizontalGridLinesBrush="#D4D4D4"
-                VerticalGridLinesBrush="#D4D4D4"
-                AlternatingRowBackground="#F7FBF8"
+                HorizontalGridLinesBrush="#E4E9E5"
+                VerticalGridLinesBrush="#E4E9E5"
+                AlternatingRowBackground="#F6FAF7"
                 RowBackground="White"
-                FontFamily="Calibri"
+                CellStyle="{StaticResource XlCell}"
+                RowStyle="{StaticResource XlRow}"
+                FontFamily="Segoe UI"
                 FontSize="12.5"
                 FrozenColumnCount="0"
                 ClipboardCopyMode="IncludeHeader"
@@ -583,29 +670,33 @@
                 SelectionMode="Extended"
                 BorderThickness="0"
                 RowHeaderWidth="42"
-                ColumnHeaderHeight="28"
-                RowHeight="22"
+                ColumnHeaderHeight="30"
+                RowHeight="24"
                 LoadingRow="OnLoadingRow"
                 CurrentCellChanged="OnCurrentCellChanged"
+                SelectedCellsChanged="OnSelectedCellsChanged"
                 AutoGeneratingColumn="OnAutoGeneratingColumn"
                 PreviewMouseLeftButtonUp="OnPivotOutlineClick"
                 PreviewKeyDown="OnGridPreviewKeyDown">
         <DataGrid.ColumnHeaderStyle>
           <Style TargetType="primitives:DataGridColumnHeader">
-            <Setter Property="Background" Value="#E2EFDA"/>
+            <Setter Property="Background" Value="#F3F6F4"/>
             <Setter Property="Foreground" Value="#1A5C38"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="FontFamily" Value="Calibri"/>
+            <Setter Property="FontFamily" Value="Segoe UI"/>
             <Setter Property="FontSize" Value="12"/>
-            <Setter Property="BorderBrush" Value="#A9D08E"/>
-            <Setter Property="BorderThickness" Value="0,0,1,1"/>
-            <Setter Property="Padding" Value="4,0,2,0"/>
-            <Setter Property="Height" Value="28"/>
+            <Setter Property="BorderBrush" Value="#DCE3DE"/>
+            <Setter Property="BorderThickness" Value="0,0,1,2"/>
+            <Setter Property="Padding" Value="6,0,2,0"/>
+            <Setter Property="Height" Value="30"/>
             <Setter Property="ContentTemplate" Value="{StaticResource ExcelColHeaderTemplate}"/>
             <Style.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="#E8F1EC"/>
+              </Trigger>
               <DataTrigger Binding="{Binding Column.(controls:ExcelColumnHeader.IsSelected), RelativeSource={RelativeSource Self}}" Value="True">
-                <Setter Property="Background" Value="#9DC3E6"/>
-                <Setter Property="BorderBrush" Value="#2E75B6"/>
+                <Setter Property="Background" Value="#CDE7D6"/>
+                <Setter Property="BorderBrush" Value="#217346"/>
                 <Setter Property="BorderThickness" Value="0,0,1,2"/>
               </DataTrigger>
             </Style.Triggers>
@@ -613,16 +704,28 @@
         </DataGrid.ColumnHeaderStyle>
         <DataGrid.RowHeaderStyle>
           <Style TargetType="primitives:DataGridRowHeader">
-            <Setter Property="Background" Value="#F5F5F5"/>
-            <Setter Property="Foreground" Value="#616161"/>
+            <Setter Property="Background" Value="#F3F6F4"/>
+            <Setter Property="Foreground" Value="#6B7280"/>
             <Setter Property="FontSize" Value="11"/>
-            <Setter Property="BorderBrush" Value="#D4D4D4"/>
+            <Setter Property="FontFamily" Value="Segoe UI"/>
+            <Setter Property="BorderBrush" Value="#DCE3DE"/>
             <Setter Property="BorderThickness" Value="0,0,1,1"/>
+            <Setter Property="Width" Value="46"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Style.Triggers>
+              <!-- Resaltar el número de fila cuando la fila está seleccionada -->
+              <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=DataGridRow}}" Value="True">
+                <Setter Property="Background" Value="#CDE7D6"/>
+                <Setter Property="Foreground" Value="#1A5C38"/>
+                <Setter Property="FontWeight" Value="SemiBold"/>
+              </DataTrigger>
+            </Style.Triggers>
           </Style>
         </DataGrid.RowHeaderStyle>
       </DataGrid>
 
-      <Border x:Name="Overlay" Background="#D9FFFFFF" Visibility="Collapsed">
+      <Border x:Name="Overlay" Grid.Row="0" Grid.RowSpan="2" Background="#D9FFFFFF" Visibility="Collapsed">
         <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="420">
           <TextBlock x:Name="OverlayTitle" Text="Cargando vista..." FontSize="16"
                      FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,0,0,8" Foreground="#1A5C38"/>
@@ -633,7 +736,7 @@
         </StackPanel>
       </Border>
 
-      <Border x:Name="EmptyState" Background="White">
+      <Border x:Name="EmptyState" Grid.Row="0" Grid.RowSpan="2" Background="White">
         <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="480">
           <Image Source="pack://application:,,,/Assets/jadeone.png" Width="72" Height="72"
                  HorizontalAlignment="Center" Margin="0,0,0,14"
