@@ -195,13 +195,84 @@ public sealed class ApiClient : IDisposable
     public Task<R2StatusResponse> GetR2StatusAsync(CancellationToken ct) =>
         GetR2StatusAsync(Schema, View, ct);
 
-    public async Task<R2StatusResponse> GetR2StatusAsync(string schema, string view, CancellationToken ct)
+    public async Task<R2StatusResponse> GetR2StatusAsync(string schema, string view, CancellationToken ct, bool fresh = false)
     {
         var url = $"{ApiUrl}/fabric/viewer/r2/status?schema={Uri.EscapeDataString(schema)}&view={Uri.EscapeDataString(view)}";
+        if (fresh)
+        {
+            url += "&fresh=1";
+        }
+
         using var response = await _http.GetAsync(url, ct).ConfigureAwait(false);
         var json = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
         return JsonSerializer.Deserialize<R2StatusResponse>(json, JsonOptions)
                ?? new R2StatusResponse { Success = false, Message = "Sin respuesta R2." };
+    }
+
+    /// <summary>
+    /// Pide a Graph-Fabric que regenere el parquet consultando Fabric.
+    /// Igual que el botón «Actualizar todo» de la web.
+    /// </summary>
+    public async Task<ForceGenerateResponse> ForceGenerateAsync(string schema, string view, CancellationToken ct)
+    {
+        var parsed = await PostJsonAsync<ForceGenerateResponse>(
+                         "/fabric/viewer/parquet-monitor/force",
+                         new { schema_name = schema, view },
+                         ct).ConfigureAwait(false)
+                     ?? throw new InvalidOperationException("Respuesta de actualización vacía.");
+        if (!parsed.Success)
+        {
+            throw new InvalidOperationException(parsed.Message ?? "No se pudo pedir la actualización.");
+        }
+
+        return parsed;
+    }
+
+    /// <summary>
+    /// Estado de la generación pedida con ForceGenerate. Null si un corte de red
+    /// impidió consultar: el llamador sigue esperando hasta el tope de 5 min.
+    /// </summary>
+    public async Task<ForceStatusResponse?> GetForceStatusAsync(string schema, string view, CancellationToken ct)
+    {
+        try
+        {
+            var url = $"{ApiUrl}/fabric/viewer/parquet-monitor/force/status"
+                      + $"?schema={Uri.EscapeDataString(schema)}&view={Uri.EscapeDataString(view)}";
+            using var response = await _http.GetAsync(url, ct).ConfigureAwait(false);
+            var json = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            var parsed = JsonSerializer.Deserialize<ForceStatusResponse>(json, JsonOptions);
+            return parsed is { Success: true } ? parsed : null;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Avisa a TI que Actualizar no se completó. Un fallo aquí no afecta al usuario.</summary>
+    public async Task ReportRefreshFailureAsync(
+        string schema,
+        string view,
+        int elapsedSeconds,
+        string reason,
+        string? detail,
+        CancellationToken ct)
+    {
+        await PostJsonAsync<JsonElement>(
+            "/fabric/viewer/parquet-monitor/refresh-failure",
+            new
+            {
+                schema_name = schema,
+                view,
+                elapsed_s = elapsedSeconds,
+                reason,
+                detail,
+            },
+            ct).ConfigureAwait(false);
     }
 
     public async Task<ExportStatusData?> GetExportStatusAsync(string jobId, CancellationToken ct)

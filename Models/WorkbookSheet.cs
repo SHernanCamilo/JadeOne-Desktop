@@ -13,6 +13,9 @@ public sealed class WorkbookSheet
     public string? Schema { get; set; }
     public string? ViewName { get; set; }
     public string? LastJobId { get; set; }
+
+    /// <summary>Hora en que Graph-Fabric terminó de generar el parquet de esta vista.</summary>
+    public DateTimeOffset? GeneratedAt { get; set; }
     public DataTable? SourceTable { get; set; }
     public List<FabricColumn> Columns { get; } = new();
     public DateRangeFilter? DateFilter { get; set; }

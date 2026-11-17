@@ -98,6 +98,47 @@ public sealed class R2StatusResponse
 
     [JsonPropertyName("row_count")]
     public long? RowCount { get; set; }
+
+    [JsonPropertyName("generated_at")]
+    public string? GeneratedAt { get; set; }
+}
+
+/// <summary>Respuesta de POST /parquet-monitor/force (botón Actualizar todo).</summary>
+public sealed class ForceGenerateResponse
+{
+    public bool Success { get; set; }
+    public string? Status { get; set; }
+    public string? Message { get; set; }
+
+    [JsonPropertyName("poll_interval_s")]
+    public int? PollIntervalS { get; set; }
+
+    [JsonPropertyName("estimated_s")]
+    public int? EstimatedS { get; set; }
+}
+
+/// <summary>Respuesta de GET /parquet-monitor/force/status.</summary>
+public sealed class ForceStatusResponse
+{
+    public bool Success { get; set; }
+    public string? Status { get; set; }
+    public string? Message { get; set; }
+    public bool Generating { get; set; }
+
+    [JsonPropertyName("estimated_s")]
+    public int? EstimatedS { get; set; }
+
+    [JsonPropertyName("poll_interval_s")]
+    public int? PollIntervalS { get; set; }
+
+    [JsonPropertyName("generated_at")]
+    public string? GeneratedAt { get; set; }
+
+    [JsonPropertyName("last_result")]
+    public string? LastResult { get; set; }
+
+    [JsonPropertyName("last_error")]
+    public string? LastError { get; set; }
 }
 
 public sealed class ViewsResponse

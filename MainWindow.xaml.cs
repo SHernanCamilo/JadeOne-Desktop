@@ -26,6 +26,9 @@ public partial class MainWindow : Window
 {
     private const int MaxExportRows = 3_000_000;
     private const int MaxLoadedViews = 8;
+    /// <summary>Tope de espera de «Actualizar todo», igual que el visor web.</summary>
+    private const int MaxRefreshWaitSeconds = 300;
+    private static readonly CultureInfo EsCo = CultureInfo.GetCultureInfo("es-CO");
     private readonly ApiClient _api = new();
     private readonly string? _protocolUrl;
     private DataTable? _table;
@@ -212,8 +215,7 @@ public partial class MainWindow : Window
             _session = await _api.ClaimAsync(apiUrl, ticket, CancellationToken.None);
             AppLog.Info($"Claim OK user={_session.User} view={_session.Schema}.{_session.View} env={env} api={_session.ApiUrl}");
             TitleText.Text = _session.ViewLabel;
-            SubtitleText.Text = $"{_session.Schema}.{_session.View}"
-                                + (string.IsNullOrWhiteSpace(_session.User) ? "" : $"  ·  {_session.User}");
+            SubtitleText.Text = _session.Schema;
             Title = $"JadeOne Desktop — {_session.ViewLabel}";
             EmptyTitle.Text = _session.ViewLabel;
             SavedBadge.Text = "Guardado";
@@ -449,10 +451,10 @@ public partial class MainWindow : Window
         var target = _activeSheet is { IsPivot: false }
             ? _activeSheet
             : _activeSheet?.PivotSource ?? EnsureDataSheet();
-        await LoadDataAsync(target);
+        await LoadDataAsync(target, force: true);
     }
 
-    private async Task LoadDataAsync(WorkbookSheet? into = null)
+    private async Task LoadDataAsync(WorkbookSheet? into = null, bool force = false)
     {
         if (_session is null)
         {
@@ -470,9 +472,15 @@ public partial class MainWindow : Window
         _elapsed.Restart();
         RefreshButton.IsEnabled = false;
         CancelButton.IsEnabled = true;
+        string? refreshNotice = null;
 
         try
         {
+            if (force)
+            {
+                refreshNotice = await ForceRegenerateAsync(schema, view, sheet, ct);
+            }
+
             ShowOverlay("Preparando columnas...", $"Consultando metadatos de {view}", true);
             _columns = await _api.GetColumnsAsync(schema, view, ct);
             FilterColumnCombo.ItemsSource = _columns;
@@ -551,6 +559,13 @@ public partial class MainWindow : Window
                     _columns.Select(c => c.Name).ToList(),
                     rowsHint > int.MaxValue ? int.MaxValue : (int)rowsHint),
                 ct);
+
+            var stamp = await TryReadStampAsync(schema, view, fresh: true, ct);
+            if (stamp is not null)
+            {
+                sheet.GeneratedAt = stamp;
+            }
+
             BindTable(table, sheet, restorePivots: !sheet.IsExtraView);
             GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
             HideOverlay();
@@ -559,7 +574,7 @@ public partial class MainWindow : Window
             CancelButton.IsEnabled = false;
             _elapsed.Stop();
             UpdateMetrics();
-            StatusText.Text = $"{table.Rows.Count:N0} registros cargados";
+            StatusText.Text = refreshNotice ?? $"{table.Rows.Count.ToString("N0", EsCo)} registros cargados";
             HintText.Text = $"{_elapsed.Elapsed.TotalSeconds:0} seg. carga";
             AppLog.Info($"Carga OK view={schema}.{view} rows={table.Rows.Count} elapsed={_elapsed.Elapsed.TotalSeconds:0.0}s");
         }
@@ -580,6 +595,168 @@ public partial class MainWindow : Window
             ShowError(ex.Message);
             RefreshButton.IsEnabled = _session is not null;
             CancelButton.IsEnabled = false;
+        }
+    }
+
+    /// <summary>
+    /// Mismo flujo que «Actualizar todo» en la web: pide a Graph-Fabric que
+    /// regenere el parquet, espera a que termine (tope 5 min) y confirma que
+    /// la hora del archivo cambió. Devuelve un aviso si no se pudo confirmar;
+    /// null si la regeneración quedó verificada. La descarga la hace el llamador.
+    /// </summary>
+    private async Task<string?> ForceRegenerateAsync(
+        string schema,
+        string view,
+        WorkbookSheet sheet,
+        CancellationToken ct)
+    {
+        var before = sheet.GeneratedAt ?? await TryReadStampAsync(schema, view, fresh: false, ct);
+
+        ShowOverlay("Actualizando...", "Pidiendo a Graph-Fabric que genere el parquet desde Fabric...", true);
+        var start = await _api.ForceGenerateAsync(schema, view, ct);
+        var estado = (start.Status ?? "generating").ToLowerInvariant();
+
+        if (estado == "too_big")
+        {
+            return null;
+        }
+
+        ForceStatusResponse? last = null;
+        if (estado != "ready")
+        {
+            var interval = Math.Max(2, start.PollIntervalS ?? 5);
+            var started = DateTime.UtcNow;
+            var sawGenerating = false;
+            ShowOverlay(
+                "Actualizando...",
+                start.EstimatedS is > 0
+                    ? $"Graph-Fabric está generando el parquet (~{start.EstimatedS}s estimados)..."
+                    : "Graph-Fabric está generando el parquet...",
+                true);
+
+            while (true)
+            {
+                var waited = (DateTime.UtcNow - started).TotalSeconds;
+                if (waited >= MaxRefreshWaitSeconds)
+                {
+                    await TryReportRefreshFailureAsync(schema, view, (int)waited, "timeout", null);
+                    throw new InvalidOperationException(
+                        $"La actualización de \"{view}\" supera los 5 minutos y sigue en proceso en el servidor. " +
+                        "Intente de nuevo en unos minutos. Ya se avisó al equipo de TI.");
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(interval), ct);
+                last = await _api.GetForceStatusAsync(schema, view, ct);
+                if (last is null)
+                {
+                    continue;
+                }
+
+                if (last.PollIntervalS is > 1)
+                {
+                    interval = last.PollIntervalS.Value;
+                }
+
+                if (last.Generating || string.Equals(last.Status, "generating", StringComparison.OrdinalIgnoreCase))
+                {
+                    sawGenerating = true;
+                    OverlayMessage.Text = last.EstimatedS is > 0
+                        ? $"Graph-Fabric está generando el parquet (~{last.EstimatedS}s estimados)..."
+                        : "Graph-Fabric está generando el parquet...";
+                    continue;
+                }
+
+                if (sawGenerating || (DateTime.UtcNow - started).TotalSeconds >= 10)
+                {
+                    break;
+                }
+            }
+        }
+
+        var resultado = (last?.LastResult ?? "").ToLowerInvariant();
+        if (resultado == "error")
+        {
+            await TryReportRefreshFailureAsync(
+                schema,
+                view,
+                (int)_elapsed.Elapsed.TotalSeconds,
+                "error",
+                last?.LastError);
+        }
+
+        var nueva = await TryReadStampAsync(schema, view, fresh: true, ct)
+                    ?? ParseStamp(last?.GeneratedAt);
+        if (nueva is not null)
+        {
+            sheet.GeneratedAt = nueva;
+        }
+
+        var confirmado = false;
+        if (nueva is DateTimeOffset ahora)
+        {
+            confirmado = before is not DateTimeOffset antes
+                         || (ahora - antes).TotalMilliseconds > 60_000;
+        }
+        if (confirmado && resultado is not ("error" or "skipped"))
+        {
+            return null;
+        }
+
+        var motivo = resultado is "error" or "skipped"
+            ? (string.IsNullOrWhiteSpace(last?.LastError)
+                ? "Graph-Fabric no pudo generarlo ahora."
+                : last!.LastError!)
+            : "No se pudo confirmar que el parquet se haya regenerado.";
+        return $"{motivo} Se muestran los datos anteriores. Intente de nuevo en unos minutos.";
+    }
+
+    private async Task<DateTimeOffset?> TryReadStampAsync(string schema, string view, bool fresh, CancellationToken ct)
+    {
+        try
+        {
+            var status = await _api.GetR2StatusAsync(schema, view, ct, fresh);
+            return ParseStamp(status.GeneratedAt);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"No se pudo leer la hora del parquet {schema}.{view}: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static DateTimeOffset? ParseStamp(string? iso)
+    {
+        if (string.IsNullOrWhiteSpace(iso))
+        {
+            return null;
+        }
+
+        return DateTimeOffset.TryParse(iso, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var at)
+            ? at
+            : null;
+    }
+
+    private static string FormatStamp(DateTimeOffset at) =>
+        at.ToLocalTime().ToString("dd/MM/yyyy, hh:mm tt", EsCo);
+
+    private async Task TryReportRefreshFailureAsync(
+        string schema,
+        string view,
+        int elapsedSeconds,
+        string reason,
+        string? detail)
+    {
+        try
+        {
+            await _api.ReportRefreshFailureAsync(schema, view, elapsedSeconds, reason, detail, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"No se pudo reportar el fallo de actualización: {ex.Message}");
         }
     }
 
@@ -951,6 +1128,120 @@ public partial class MainWindow : Window
         }
 
         RefreshTotals();
+        UpdateHeader();
+    }
+
+    /// <summary>
+    /// Barra verde como el visor web:
+    /// esquema · Actualizado dd/MM/yyyy, hh:mm a. m. · N registros.
+    /// </summary>
+    private void UpdateHeader()
+    {
+        if (_session is null || _session.Token == "demo")
+        {
+            return;
+        }
+
+        var shown = HeaderDataSheet();
+        if (shown is null)
+        {
+            TitleText.Text = string.IsNullOrWhiteSpace(_session.ViewLabel) ? "JadeOne Desktop" : _session.ViewLabel;
+            SubtitleText.Text = _session.Schema;
+            return;
+        }
+
+        if (shown.IsBlank)
+        {
+            TitleText.Text = shown.Name;
+            SubtitleText.Text = "Hoja en blanco";
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(shown.Name))
+        {
+            TitleText.Text = shown.Name;
+            Title = $"JadeOne Desktop — {shown.Name}";
+        }
+
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(shown.Schema))
+        {
+            parts.Add(shown.Schema);
+        }
+
+        if (shown.GeneratedAt is DateTimeOffset at)
+        {
+            parts.Add("Actualizado " + FormatStamp(at));
+        }
+
+        var rows = shown.SourceTable?.Rows.Count ?? 0;
+        if (rows > 0)
+        {
+            parts.Add($"{rows.ToString("N0", EsCo)} registros");
+        }
+
+        if (shown.DateFilter is not null)
+        {
+            parts.Add("1 filtro(s)");
+        }
+
+        SubtitleText.Text = parts.Count > 0 ? string.Join("  ·  ", parts) : _session.Schema;
+    }
+
+    /// <summary>Hoja de datos cuyo esquema, fecha y conteo van en la barra.</summary>
+    private WorkbookSheet? HeaderDataSheet()
+    {
+        if (_activeSheet is { IsPivot: true, PivotSource: { } source })
+        {
+            return source;
+        }
+
+        if (_activeSheet is { IsPivot: false })
+        {
+            return _activeSheet;
+        }
+
+        return _sheets.FirstOrDefault(s => !s.IsPivot && !s.IsBlank);
+    }
+
+    private int _stampRequest;
+
+    /// <summary>Completa la hora del parquet si la hoja ya tiene datos y todavía no la tiene.</summary>
+    private async void RefreshStampIfMissing(WorkbookSheet sheet)
+    {
+        if (_session is null || _session.Token == "demo" || sheet.GeneratedAt is not null || sheet.IsBlank || sheet.IsPivot)
+        {
+            return;
+        }
+
+        if (sheet.SourceTable is null
+            || string.IsNullOrWhiteSpace(sheet.Schema)
+            || string.IsNullOrWhiteSpace(sheet.ViewName))
+        {
+            return;
+        }
+
+        var token = ++_stampRequest;
+        var schema = sheet.Schema;
+        var view = sheet.ViewName;
+        try
+        {
+            var at = await TryReadStampAsync(schema, view, fresh: false, CancellationToken.None);
+            if (token != _stampRequest || at is null)
+            {
+                return;
+            }
+
+            if (sheet.GeneratedAt is not DateTimeOffset current || at > current)
+            {
+                sheet.GeneratedAt = at;
+                UpdateHeader();
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"No se pudo completar la hora de {schema}.{view}: {ex.Message}");
+        }
     }
 
     private void ShowOverlay(string title, string message, bool indeterminate)
@@ -1147,6 +1438,11 @@ public partial class MainWindow : Window
         RefreshPivotFilterBar();
         UpdateMetrics();
         RefreshColumnPanel();
+        var dataForStamp = sheet.IsPivot ? sheet.PivotSource : sheet;
+        if (dataForStamp is not null)
+        {
+            RefreshStampIfMissing(dataForStamp);
+        }
     }
 
     private void RefreshSheetTabs()
